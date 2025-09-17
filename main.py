@@ -44,6 +44,67 @@ def ensure_session_directory() -> Path:
 # =============================================================================
 
 
+def execute_forensic_analysis_session_stream(
+    session_id: str,
+    input_artifacts: str
+):
+    """
+    Executes a complete forensic analysis workflow with isolated, persistent state.
+    Yields events for real-time streaming to UI.
+    """
+    print(f"[INFO] Initializing session: {session_id}")
+
+    session_dir = ensure_session_directory()
+    db_path = session_dir / f"{session_id}.db"
+
+    # SqliteSaver provides persistent checkpointing for the session's state.
+    with SqliteSaver.from_conn_string(str(db_path)) as memory:
+        # Compile the graph with the session-specific checkpointer.
+        agent = builder.compile(checkpointer=memory)
+
+        # Configure the session for LangGraph's stream method.
+        config = {"configurable": {"thread_id": session_id},
+                  "recursion_limit": 300}
+
+        try:
+            print("[INFO] Executing workflow stream...")
+            # Execute the workflow.
+            events = agent.stream(
+                {"messages": [("user", input_artifacts)]},
+                config=config,
+                stream_mode="values"
+            )
+
+            step_count = 0
+
+            # Yield each event for real-time processing
+            for event in events:
+                step_count += 1
+                yield {
+                    "type": "step",
+                    "step_number": step_count,
+                    "event": event,
+                    "session_id": session_id
+                }
+
+            # Yield final result
+            yield {
+                "type": "completion",
+                "session_id": session_id,
+                "total_steps": step_count,
+                "session_db_path": str(db_path),
+                "final_event": event
+            }
+
+        except Exception as e:
+            print(f"[ERROR] Session {session_id} failed: {str(e)}")
+            yield {
+                "type": "error",
+                "session_id": session_id,
+                "error": str(e)
+            }
+
+
 def execute_forensic_analysis_session(
     session_id: str,
     input_artifacts: str,

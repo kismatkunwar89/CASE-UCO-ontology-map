@@ -24,6 +24,9 @@ rdflib>=7.0.0
 # Progress Bars and UI
 tqdm>=4.65.0
 
+# Streamlit Web Application Framework
+streamlit>=1.28.0
+
 # Standard Library Extensions
 typing-extensions>=4.7.0
 
