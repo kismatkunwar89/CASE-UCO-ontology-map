@@ -1,7 +1,8 @@
 import streamlit as st
 import json
 import time
-from main import execute_forensic_analysis_session_stream, generate_session_id
+import requests
+from sseclient import SSEClient
 
 # Page configuration
 st.set_page_config(
@@ -60,13 +61,13 @@ with col2:
 if 'analysis_running' not in st.session_state:
     st.session_state.analysis_running = False
 
+# API Configuration
+API_BASE_URL = "http://localhost:9000/api/v1"
+
 # Handle button click
 if run_analysis and input_artifacts.strip():
     if not st.session_state.analysis_running:
         st.session_state.analysis_running = True
-
-        # Generate session ID
-        session_id = generate_session_id(user_identifier)
 
         # Clear previous results
         log_container.empty()
@@ -76,67 +77,106 @@ if run_analysis and input_artifacts.strip():
 
         # Display initial message
         with log_container.container():
-            st.info(f"🚀 Starting analysis session: {session_id}")
-            st.info("Initializing multi-agent system...")
+            st.info("🚀 Starting analysis session...")
+            st.info("Connecting to API server...")
 
         try:
             # Create a progress bar
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            # Execute the analysis session with real-time streaming
+            # Prepare API request data
+            api_data = {
+                "user_identifier": user_identifier,
+                "input_artifacts": input_artifacts
+            }
+
+            # Make streaming request to FastAPI server
+            response = requests.post(
+                f"{API_BASE_URL}/invoke-streaming",
+                json=api_data,
+                stream=True,
+                headers={"Accept": "text/plain"}
+            )
+
+            if response.status_code != 200:
+                raise Exception(
+                    f"API request failed with status {response.status_code}: {response.text}")
+
+            # Initialize variables for processing
             final_result = None
             step_count = 0
+            session_id = None
 
             # Initialize log display
             log_display = log_container.container()
 
-            for stream_event in execute_forensic_analysis_session_stream(session_id, input_artifacts):
-                if stream_event["type"] == "step":
-                    step_count = stream_event["step_number"]
-                    event = stream_event["event"]
+            # Process streaming response
+            for line in response.iter_lines(decode_unicode=True):
+                if line.startswith("data: "):
+                    try:
+                        # Parse the JSON data from the SSE stream
+                        data = json.loads(line[6:])  # Remove "data: " prefix
 
-                    # Update progress
-                    # Cap at 90% until completion
-                    progress_bar.progress(min(step_count / 10, 0.9))
-                    status_text.text(
-                        f"Step {step_count}: Processing agent workflow...")
+                        if data["type"] == "step":
+                            step_count = data["data"]["step_number"]
+                            event = data["data"]["event"]
+                            session_id = data["session_id"]
 
-                    # Display step information in log
-                    with log_display:
-                        st.info(
-                            f"🔄 Step {step_count}: Agent workflow in progress")
-                        if "messages" in event and event["messages"]:
-                            last_message = event["messages"][-1]
-                            if hasattr(last_message, 'content'):
-                                st.text(
-                                    f"Agent: {last_message.content[:200]}...")
+                            # Update progress
+                            # Cap at 90% until completion
+                            progress_bar.progress(min(step_count / 10, 0.9))
+                            status_text.text(
+                                f"Step {step_count}: Processing agent workflow...")
 
-                    # Small delay to make the UI more readable
-                    time.sleep(0.5)
+                            # Display step information in log
+                            with log_display:
+                                st.info(
+                                    f"🔄 Step {step_count}: Agent workflow in progress")
+                                if "messages" in event and event["messages"]:
+                                    last_message = event["messages"][-1]
+                                    if hasattr(last_message, 'content'):
+                                        st.text(
+                                            f"Agent: {last_message.content[:200]}...")
 
-                elif stream_event["type"] == "completion":
-                    # Update progress to 100%
-                    progress_bar.progress(1.0)
-                    status_text.text("✅ Analysis completed!")
+                        elif data["type"] == "completion":
+                            # Update progress to 100%
+                            progress_bar.progress(1.0)
+                            status_text.text("✅ Analysis completed!")
 
-                    # Display completion message
-                    with log_display:
-                        st.success("✅ Analysis completed successfully!")
-                        st.info(
-                            f"Session completed in {stream_event['total_steps']} steps")
+                            # Display completion message
+                            with log_display:
+                                st.success(
+                                    "✅ Analysis completed successfully!")
+                                st.info(
+                                    f"Session completed in {data['data']['total_steps']} steps")
 
-                    final_result = stream_event
-                    break
+                            final_result = data["data"]
+                            session_id = data["session_id"]
+                            break
 
-                elif stream_event["type"] == "error":
-                    # Handle error
-                    progress_bar.progress(0)
-                    status_text.text("❌ Analysis failed")
+                        elif data["type"] == "error":
+                            # Handle error
+                            progress_bar.progress(0)
+                            status_text.text("❌ Analysis failed")
 
-                    with log_display:
-                        st.error(f"❌ Analysis failed: {stream_event['error']}")
-                    break
+                            with log_display:
+                                st.error(
+                                    f"❌ Analysis failed: {data['data']['error']}")
+                            break
+
+                        elif data["type"] == "stream_error":
+                            # Handle stream error
+                            progress_bar.progress(0)
+                            status_text.text("❌ Stream error")
+
+                            with log_display:
+                                st.error(f"❌ Stream error: {data['error']}")
+                            break
+
+                    except json.JSONDecodeError as e:
+                        # Skip malformed JSON lines
+                        continue
 
             # Clear progress indicators
             progress_bar.empty()
@@ -149,16 +189,33 @@ if run_analysis and input_artifacts.strip():
                     "final_event", {}).get("jsonldGraph", {})
 
                 if final_graph:
+                    # Pre-serialize JSON for download (optimized)
+                    json_str = json.dumps(final_graph, separators=(
+                        ',', ':'))  # Compact format for speed
+
+                    # Batch all UI updates together for better performance
                     with json_container.container():
                         st.subheader("📋 Generated JSON-LD Graph")
-                        st.json(final_graph)
 
-                    # Create download button
-                    json_str = json.dumps(final_graph, indent=2)
+                        # Show summary first for immediate feedback
+                        graph_summary = {
+                            "entities_count": len(final_graph.get("@graph", [])),
+                            "context_namespaces": len(final_graph.get("@context", {})),
+                            "graph_size": f"{len(json_str)} characters"
+                        }
+                        st.info(
+                            f"📊 Graph Summary: {graph_summary['entities_count']} entities, {graph_summary['context_namespaces']} namespaces")
+
+                        # Use expander for better performance with large JSON
+                        with st.expander("🔍 View Full JSON-LD Graph", expanded=True):
+                            st.json(final_graph)
+
+                    # Create download button with pre-serialized data
                     with download_container.container():
                         st.download_button(
                             label="💾 Download JSON-LD",
-                            data=json_str,
+                            # Pretty format for download
+                            data=json.dumps(final_graph, indent=2),
                             file_name=f"forensic_analysis_{session_id}.json",
                             mime="application/json",
                             use_container_width=True
@@ -180,6 +237,12 @@ if run_analysis and input_artifacts.strip():
                         st.error("❌ No JSON-LD graph was generated")
                         st.info("Check the logs for more information")
 
+        except requests.exceptions.ConnectionError:
+            with log_container.container():
+                st.error("❌ Cannot connect to API server")
+                st.info(
+                    "Please make sure the FastAPI server is running on http://localhost:9000")
+                st.info("Start the server with: python main.py")
         except Exception as e:
             with log_container.container():
                 st.error(f"❌ Analysis failed: {str(e)}")
@@ -212,12 +275,14 @@ with st.sidebar:
 
     st.header("🚀 Quick Start")
     st.markdown("""
-    1. Enter your user identifier
-    2. Paste forensic artifact text
-    3. Click "Run Analysis"
-    4. View real-time progress
-    5. Download JSON-LD output
-    6. Check Phoenix trace
+    1. **Start the API server**: `python main.py`
+    2. **Start this UI**: `streamlit run app.py`
+    3. Enter your user identifier
+    4. Paste forensic artifact text
+    5. Click "Run Analysis"
+    6. View real-time progress
+    7. Download JSON-LD output
+    8. Check Phoenix trace
     """)
 
     st.header("📚 Resources")

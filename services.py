@@ -1,0 +1,245 @@
+"""
+Services module containing core business logic for forensic analysis.
+Refactored from main.py to separate concerns and enable API integration.
+"""
+
+import os
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Generator, Dict, Any
+
+# --- LangGraph and LangChain Imports ---
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+# --- Custom Module Imports ---
+from graph import builder
+
+
+def generate_session_id(user_identifier: str = "user") -> str:
+    """Generates a unique session ID for user and task isolation."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_id = str(uuid.uuid4())[:8]
+    user_prefix = user_identifier[:10] if user_identifier else "user"
+    return f"{user_prefix}_{timestamp}_{unique_id}"
+
+
+def ensure_session_directory() -> Path:
+    """Ensures the base 'sessions' directory exists and returns its path."""
+    session_dir = Path("sessions")
+    session_dir.mkdir(exist_ok=True)
+    return session_dir
+
+
+def execute_forensic_analysis_session_stream(
+    session_id: str,
+    input_artifacts: str
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    Executes a complete forensic analysis workflow with isolated, persistent state.
+    Yields events for real-time streaming to UI.
+
+    Args:
+        session_id: Unique identifier for this analysis session
+        input_artifacts: The forensic artifact description to analyze
+
+    Yields:
+        Dict containing event data with type, step information, and session details
+    """
+    print(f"[INFO] Initializing session: {session_id}")
+
+    session_dir = ensure_session_directory()
+    db_path = session_dir / f"{session_id}.db"
+
+    # SqliteSaver provides persistent checkpointing for the session's state.
+    with SqliteSaver.from_conn_string(str(db_path)) as memory:
+        # Compile the graph with the session-specific checkpointer.
+        agent = builder.compile(checkpointer=memory)
+
+        # Configure the session for LangGraph's stream method.
+        config = {"configurable": {"thread_id": session_id},
+                  "recursion_limit": 300}
+
+        try:
+            print("[INFO] Executing workflow stream...")
+            # Execute the workflow.
+            events = agent.stream(
+                {"messages": [("user", input_artifacts)]},
+                config=config,
+                stream_mode="values"
+            )
+
+            step_count = 0
+
+            # Yield each event for real-time processing
+            for event in events:
+                step_count += 1
+
+                # Create JSON-serializable version of the event
+                serializable_event = {}
+                for key, value in event.items():
+                    if key == "messages" and isinstance(value, list):
+                        # Convert LangChain messages to serializable format
+                        serializable_event[key] = []
+                        for msg in value:
+                            if hasattr(msg, 'content') and hasattr(msg, 'type'):
+                                serializable_event[key].append({
+                                    "type": msg.type,
+                                    "content": msg.content
+                                })
+                            else:
+                                # Handle other message formats
+                                serializable_event[key].append(str(msg))
+                    else:
+                        # For other fields, try to serialize or convert to string
+                        try:
+                            import json
+                            json.dumps(value)  # Test if serializable
+                            serializable_event[key] = value
+                        except (TypeError, ValueError):
+                            serializable_event[key] = str(value)
+
+                yield {
+                    "type": "step",
+                    "step_number": step_count,
+                    "event": serializable_event,
+                    "session_id": session_id
+                }
+
+            # Yield final result
+            # Create JSON-serializable version of the final event
+            serializable_final_event = {}
+            for key, value in event.items():
+                if key == "messages" and isinstance(value, list):
+                    # Convert LangChain messages to serializable format
+                    serializable_final_event[key] = []
+                    for msg in value:
+                        if hasattr(msg, 'content') and hasattr(msg, 'type'):
+                            serializable_final_event[key].append({
+                                "type": msg.type,
+                                "content": msg.content
+                            })
+                        else:
+                            # Handle other message formats
+                            serializable_final_event[key].append(str(msg))
+                else:
+                    # For other fields, try to serialize or convert to string
+                    try:
+                        import json
+                        json.dumps(value)  # Test if serializable
+                        serializable_final_event[key] = value
+                    except (TypeError, ValueError):
+                        serializable_final_event[key] = str(value)
+
+            yield {
+                "type": "completion",
+                "session_id": session_id,
+                "total_steps": step_count,
+                "session_db_path": str(db_path),
+                "final_event": serializable_final_event
+            }
+
+        except Exception as e:
+            print(f"[ERROR] Session {session_id} failed: {str(e)}")
+            yield {
+                "type": "error",
+                "session_id": session_id,
+                "error": str(e)
+            }
+
+
+def execute_forensic_analysis_session(
+    session_id: str,
+    input_artifacts: str,
+    show_all_steps: bool = False
+) -> Dict[str, Any]:
+    """
+    Executes a complete forensic analysis workflow with isolated, persistent state.
+
+    Args:
+        session_id: Unique identifier for this analysis session
+        input_artifacts: The forensic artifact description to analyze
+        show_all_steps: Whether to print detailed step information
+
+    Returns:
+        Dict containing the final analysis result and session information
+    """
+    print(f"[INFO] Initializing session: {session_id}")
+
+    session_dir = ensure_session_directory()
+    db_path = session_dir / f"{session_id}.db"
+
+    # SqliteSaver provides persistent checkpointing for the session's state.
+    with SqliteSaver.from_conn_string(str(db_path)) as memory:
+        # Compile the graph with the session-specific checkpointer.
+        agent = builder.compile(checkpointer=memory)
+
+        # Configure the session for LangGraph's stream method.
+        config = {"configurable": {"thread_id": session_id},
+                  "recursion_limit": 300}
+
+        try:
+            print("[INFO] Executing workflow stream...")
+            # Execute the workflow.
+            events = agent.stream(
+                {"messages": [("user", input_artifacts)]},
+                config=config,
+                stream_mode="values"
+            )
+
+            final_event = None
+            step_count = 0
+
+            # Process all events from the stream to get the final state.
+            for event in events:
+                step_count += 1
+                final_event = event
+                if show_all_steps and "messages" in event and event["messages"]:
+                    print(f"\n--- STEP {step_count} ---")
+                    event["messages"][-1].pretty_print()
+
+            result = {
+                "session_id": session_id,
+                "final_state": final_event,
+                "total_steps": step_count,
+                "session_db_path": str(db_path)
+            }
+
+            print(
+                f"\n[SUCCESS] Session {session_id} completed in {step_count} steps.")
+            return result
+
+        except Exception as e:
+            print(f"[ERROR] Session {session_id} failed: {str(e)}")
+            raise
+
+
+# Legacy compatibility functions
+def call_forensic_analysis_with_session(
+    user_identifier: str,
+    input_artifacts: str,
+    show_all_steps: bool = False
+) -> Dict[str, Any]:
+    """Creates a new session and runs the forensic analysis."""
+    session_id = generate_session_id(user_identifier)
+    return execute_forensic_analysis_session(session_id, input_artifacts, show_all_steps)
+
+
+def call_enhanced_forensic_system(agent, prompt, show_all_steps=True, recursion_limit=300):
+    """Legacy function modified for backward compatibility to use session management."""
+    temp_session_id = generate_session_id("temp_legacy")
+    return execute_forensic_analysis_session(temp_session_id, prompt, show_all_steps)
+
+
+def call_three_agent_system(agent, prompt, show_all_steps=True, recursion_limit=300):
+    """Legacy function wrapper."""
+    return call_enhanced_forensic_system(agent, prompt, show_all_steps, recursion_limit)
+
+
+def call_multi_agent_system(agent, prompt, show_all_steps=True, recursion_limit=300):
+    """Legacy function wrapper."""
+    return call_enhanced_forensic_system(agent, prompt, show_all_steps, recursion_limit)
+
+
+print("[INFO] Enhanced execution functions with session support defined.")
+print("[INFO] New API available: call_forensic_analysis_with_session(user_id, input, show_steps)")

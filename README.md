@@ -50,12 +50,15 @@ my-agent/
 ├── sessions/                        # Session databases (created at runtime)
 ├── test/                           # Test files
 ├── .env                            # Environment variables
+├── app.py                          # Streamlit web UI (API client)
 ├── case_uco.py                     # CASE/UCO ontology definitions
 ├── config.py                       # Configuration management
 ├── graph.py                        # LangGraph workflow definition
-├── main.py                         # Main execution entry point
+├── main.py                         # FastAPI server entry point
 ├── memory.py                       # Memory and state management
+├── routes.py                       # FastAPI API endpoints
 ├── schemas.py                      # Pydantic data models
+├── services.py                     # Core business logic (refactored from main.py)
 ├── state.py                        # Agent state definitions
 ├── tools.py                        # LangChain tools and functions
 ├── utils.py                        # Utility functions
@@ -98,9 +101,51 @@ my-agent/
 
 ## 🚀 Usage
 
-### Basic Usage
+### New Architecture (FastAPI + Streamlit)
 
-Run the system with a sample forensic artifact:
+The system has been refactored into a client-server architecture:
+
+#### 1. Start the FastAPI Backend Server
+
+In one terminal, start the API server:
+
+```bash
+# Activate virtual environment
+source ../.venv/bin/activate  # or venv\Scripts\activate on Windows
+
+# Start the FastAPI server
+python main.py
+```
+
+The API server will start on `http://localhost:9000` with:
+- API documentation at: `http://localhost:9000/docs`
+- Health check at: `http://localhost:9000/api/v1/health`
+
+#### 2. Start the Streamlit Frontend
+
+In a second terminal, start the web UI:
+
+```bash
+# Activate virtual environment
+source ../.venv/bin/activate  # or venv\Scripts\activate on Windows
+
+# Start the Streamlit app
+streamlit run app.py
+```
+
+The web interface will be available at `http://localhost:8501`
+
+#### 3. Use the System
+
+1. Open your browser to `http://localhost:8501`
+2. Enter your user identifier
+3. Paste your forensic artifact description
+4. Click "Run Analysis"
+5. Watch real-time progress and download the JSON-LD result
+
+### Legacy Usage (Direct Execution)
+
+For direct execution without the web interface:
 
 ```bash
 python main.py
@@ -110,8 +155,10 @@ This will execute the default example with a Windows Prefetch file artifact.
 
 ### Programmatic Usage
 
+#### Using the Services Module (Direct)
+
 ```python
-from main import call_forensic_analysis_with_session
+from services import call_forensic_analysis_with_session
 
 # Create a new analysis session
 result = call_forensic_analysis_with_session(
@@ -125,12 +172,40 @@ jsonld_graph = result["final_state"]["jsonldGraph"]
 print(jsonld_graph)
 ```
 
+#### Using the API (HTTP Client)
+
+```python
+import requests
+import json
+
+# Make API request to the FastAPI server
+api_data = {
+    "user_identifier": "analyst_001",
+    "input_artifacts": "Your forensic artifact description here..."
+}
+
+response = requests.post(
+    "http://localhost:9000/api/v1/invoke-streaming",
+    json=api_data,
+    stream=True
+)
+
+# Process streaming response
+for line in response.iter_lines(decode_unicode=True):
+    if line.startswith("data: "):
+        data = json.loads(line[6:])
+        if data["type"] == "completion":
+            final_graph = data["data"]["final_event"]["jsonldGraph"]
+            print(final_graph)
+            break
+```
+
 ### Session Management
 
 Each analysis run creates a unique session with persistent state:
 
 ```python
-from main import generate_session_id, execute_forensic_analysis_session
+from services import generate_session_id, execute_forensic_analysis_session
 
 # Generate a unique session ID
 session_id = generate_session_id("user_123")
