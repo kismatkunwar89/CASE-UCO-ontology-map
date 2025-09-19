@@ -39,8 +39,7 @@ def supervisor_node(state: State) -> Command:
                              and state.get("ontologyMarkdown"))
     custom_facets_complete = bool(
         state.get("customFacets") is not None and state.get("customState") is not None)
-    graph_complete = bool(state.get("jsonldGraph")
-                          and state.get("graphMarkdown"))
+    graph_complete = bool(state.get("jsonldGraph"))
 
     validation_result = state.get("validation_result", {})
     validation_complete = validation_result.get("is_clean", False)

@@ -34,32 +34,15 @@ def _get_input_artifacts(state):
 RE_FENCED_JSON = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
-def parse_ontology_response(content: str, input_text: str) -> Dict[str, Any]:
+def parse_ontology_response(content: str) -> Dict[str, Any]:
     """Parse the LLM response to extract the JSON block for ontology mapping."""
     m = RE_FENCED_JSON.search(content)
     if m:
         try:
             data = json.loads(m.group(1))
-            return {
-                "input_text": input_text,
-                "artifacts": data.get("artifacts", []),
-                "classes": data.get("classes", []),
-                "properties": data.get("properties", {}),
-                "facets": data.get("facets", []),
-                "relationships": data.get("relationships", []),
-                "additional_details": {"markdown": content}
-            }
+            return data
         except json.JSONDecodeError:
-            # If JSON is malformed, fall through to the fallback
-            pass
+            return {"error": "Malformed JSON block found in agent response."}
 
-    # Fallback if no JSON is found or if parsing fails
-    return {
-        "input_text": input_text,
-        "artifacts": [],
-        "classes": [],
-        "properties": {},
-        "facets": [],
-        "relationships": [],
-        "additional_details": {"markdown": content}
-    }
+    # Fallback if no JSON is found
+    return {"error": "No JSON block found in the agent response."}

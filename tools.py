@@ -45,12 +45,15 @@ def analyze_case_uco_class(class_name: str, output_format: str = "markdown") -> 
         if not cls:
             return "Error: class_name is required."
 
-        # Cached analyzer instance
+        # Cached analyzer instance with lazy loading
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
-            from case_uco import CaseUcoAnalyzer
-            analyzer = CaseUcoAnalyzer()
+            print("[INFO] [Tools] Initializing CASE/UCO analyzer (first time only)...")
+            # Use fast analyzer for quick startup
+            from case_uco_fast import get_fast_analyzer
+            analyzer = get_fast_analyzer()
             globals()["_case_uco_analyzer"] = analyzer
+            print("[SUCCESS] [Tools] CASE/UCO analyzer ready")
 
         # Early guard for unknown class
         probe = analyzer.get_class_summary(cls)
@@ -129,8 +132,8 @@ def list_case_uco_classes(filter_term: str = "") -> str:
     try:
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
-            from case_uco import CaseUcoAnalyzer
-            analyzer = CaseUcoAnalyzer()
+            from case_uco_fast import get_fast_analyzer
+            analyzer = get_fast_analyzer()
             globals()["_case_uco_analyzer"] = analyzer
         classes = analyzer.list_all_classes()
         if filter_term:
@@ -157,8 +160,8 @@ def analyze_case_uco_facets() -> str:
     try:
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
-            from case_uco import CaseUcoAnalyzer
-            analyzer = CaseUcoAnalyzer()
+            from case_uco_fast import get_fast_analyzer
+            analyzer = get_fast_analyzer()
             globals()["_case_uco_analyzer"] = analyzer
         facet_analysis = analyzer.analyze_facets()
         result = f"CASE/UCO Facet Analysis:\n"
@@ -186,8 +189,8 @@ def analyze_case_uco_relationships() -> str:
     try:
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
-            from case_uco import CaseUcoAnalyzer
-            analyzer = CaseUcoAnalyzer()
+            from case_uco_fast import get_fast_analyzer
+            analyzer = get_fast_analyzer()
             globals()["_case_uco_analyzer"] = analyzer
         relationship_analysis = analyzer.analyze_relationships()
         result = f"CASE/UCO Relationship Analysis:\n"

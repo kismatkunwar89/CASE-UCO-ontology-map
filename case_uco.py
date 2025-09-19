@@ -80,9 +80,10 @@ class CaseUcoAnalyzer:
             return
 
         print("Loading CASE/UCO ontologies in parallel...")
+        total_ontologies = len(self.uco_urls)
         
-        # Use ThreadPoolExecutor for parallel loading
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        # Use ThreadPoolExecutor for parallel loading with optimized workers
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             # Submit all download tasks
             future_to_name = {
                 executor.submit(self._load_single_ontology, name, url): name 

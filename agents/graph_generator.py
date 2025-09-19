@@ -98,7 +98,6 @@ def graph_generator_node(state: State) -> Command:
         return Command(
             update={
                 "jsonldGraph": fallback_graph,
-                "graphMarkdown": json.dumps(fallback_graph, indent=2),
                 "graphGeneratorAttempts": current_attempts,
                 "messages": [HumanMessage(content=f"Graph generation failed after {MAX_GRAPH_GENERATOR_ATTEMPTS} attempts, providing fallback", name="graph_generator_agent")],
             },
@@ -218,7 +217,8 @@ Generate valid JSON-LD even if custom facets are empty.
 """
 
     # Add previous output section like complete_main_code.py
-    previous_output_section = state.get("graphMarkdown", "")
+    previous_jsonld = state.get("jsonldGraph", {})
+    previous_output_section = json.dumps(previous_jsonld, indent=2) if previous_jsonld else ""
     prompt = f"""{prompt}
 
 ## PREVIOUS OUTPUT (if any):
@@ -395,12 +395,11 @@ Previous attempt {current_attempts + 1}:
         return Command(
             update={
                 "jsonldGraph": json_obj,
-                "graphMarkdown": json.dumps(json_obj, indent=2),
                 "graphGeneratorAttempts": current_attempts + 1,
                 "learningContext": learning_context + new_learning_context,
                 "messages": [HumanMessage(content=json.dumps(json_obj, indent=2), name="graph_generator_agent")],
-                "validation_result": {},
-                "validation_feedback": "",
+                # REMOVED: "validation_result": {},      # ← This conflicts with validator!
+                # REMOVED: "validation_feedback": "",    # ← This conflicts with validator!
             },
             goto="validator_node",
         )

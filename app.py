@@ -3,23 +3,70 @@ import json
 import time
 import requests
 from sseclient import SSEClient
+import logging
 
-# Page configuration
+# Set up detailed logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('streamlit_debug.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Log import timing
+print("🚀 [APP START] Starting Streamlit app imports...")
+logger.info("🚀 [APP START] Starting Streamlit app imports...")
+import_start = time.time()
+
+# Log page config timing
+print("⚙️ [CONFIG] Setting up page configuration...")
+logger.info("⚙️ [CONFIG] Setting up page configuration...")
+config_start = time.time()
+
+# Page configuration - optimized for faster rendering
 st.set_page_config(
     page_title="CASE/UCO Ontology Mapping Agent",
     page_icon="🔍",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    # Optimize for faster initial load
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': "CASE/UCO Ontology Mapping Agent v1.0"
+    }
 )
+
+config_end = time.time()
+print(f"✅ [CONFIG] Page config completed in {config_end - config_start:.3f}s")
+logger.info(
+    f"✅ [CONFIG] Page config completed in {config_end - config_start:.3f}s")
+
+# Log UI rendering timing
+print("🎨 [UI] Starting UI rendering...")
+logger.info("🎨 [UI] Starting UI rendering...")
+ui_start = time.time()
 
 # Page title
 st.title("🔍 CASE/UCO Ontology Mapping Agent")
 st.markdown("Transform unstructured digital forensics reports into structured JSON-LD graphs using our multi-agent system.")
 
+# Remove blocking import - let UI render immediately
+# Ontology loading will happen when user clicks "Run Analysis"
+logger.info("✅ [UI] Basic UI elements rendered")
+
+# Log layout creation timing
+logger.info("📐 [LAYOUT] Creating two-column layout...")
+layout_start = time.time()
+
 # Create two-column layout
 col1, col2 = st.columns([1, 1])
 
 with col1:
+    logger.info("📝 [INPUT] Rendering input configuration...")
     st.header("📝 Input Configuration")
 
     # User identifier input
@@ -48,7 +95,10 @@ Artifact: Windows Prefetch File
     run_analysis = st.button(
         "🚀 Run Analysis", type="primary", use_container_width=True)
 
+    logger.info("✅ [INPUT] Input configuration rendered")
+
 with col2:
+    logger.info("📊 [OUTPUT] Rendering output area...")
     st.header("📊 Analysis Results")
 
     # Create placeholder containers for real-time updates
@@ -57,12 +107,41 @@ with col2:
     download_container = st.empty()
     phoenix_container = st.empty()
 
+    logger.info("✅ [OUTPUT] Output area rendered")
+
+# Log layout completion
+layout_end = time.time()
+logger.info(f"✅ [LAYOUT] Layout completed in {layout_end - layout_start:.3f}s")
+
+# Log session state initialization
+logger.info("🔧 [SESSION] Initializing session state...")
+session_start = time.time()
+
 # Initialize session state
 if 'analysis_running' not in st.session_state:
     st.session_state.analysis_running = False
 
 # API Configuration
 API_BASE_URL = "http://localhost:9000/api/v1"
+
+session_end = time.time()
+logger.info(
+    f"✅ [SESSION] Session state initialized in {session_end - session_start:.3f}s")
+
+# Log total UI render time
+ui_end = time.time()
+total_ui_time = ui_end - ui_start
+print(f"🎉 [UI COMPLETE] Total UI rendering completed in {total_ui_time:.3f}s")
+logger.info(
+    f"🎉 [UI COMPLETE] Total UI rendering completed in {total_ui_time:.3f}s")
+
+# Log total app startup time
+import_end = time.time()
+total_startup_time = import_end - import_start
+print(
+    f"🚀 [APP COMPLETE] Total app startup completed in {total_startup_time:.3f}s")
+logger.info(
+    f"🚀 [APP COMPLETE] Total app startup completed in {total_startup_time:.3f}s")
 
 # Handle button click
 if run_analysis and input_artifacts.strip():
@@ -81,6 +160,11 @@ if run_analysis and input_artifacts.strip():
             st.info("Connecting to API server...")
 
         try:
+            # Show initialization status
+            with log_container.container():
+                st.info("🚀 Starting analysis session...")
+                st.info("🔧 Initializing ontology analyzer...")
+
             # Create a progress bar
             progress_bar = st.progress(0)
             status_text = st.empty()

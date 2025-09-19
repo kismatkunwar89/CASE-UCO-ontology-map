@@ -75,7 +75,7 @@ def ontology_research_node(state: State) -> Command:
     agent_output = result["messages"][-1].content
 
     # Parse the agent's output into a structured dictionary
-    ontology_map = parse_ontology_response(agent_output, input_text)
+    ontology_map = parse_ontology_response(agent_output)
 
     print("[SUCCESS] [Ontology] Research complete, updating state.")
 

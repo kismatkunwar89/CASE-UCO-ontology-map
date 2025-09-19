@@ -25,7 +25,6 @@ class State(_BaseState, total=False):
     customFacets: Dict[str, Any]
     customState: Dict[str, Any]
     jsonldGraph: Dict[str, Any]
-    graphMarkdown: str
 
     # Loop control variables
     customFacetAttempts: int
