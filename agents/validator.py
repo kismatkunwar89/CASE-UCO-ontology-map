@@ -9,11 +9,10 @@ from langgraph.types import Command
 from state import State
 from config import llm, MAX_VALIDATION_ATTEMPTS
 from utils import RE_FENCED_JSON
-
+from tools import validate_case_jsonld
 # =============================================================================
 # Agent Node Function
 # =============================================================================
-
 
 def validator_node(state: State) -> Command:
     """

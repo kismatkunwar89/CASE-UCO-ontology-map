@@ -1,14 +1,20 @@
+# tools.py
 import json
-import requests
 import uuid
-from datetime import datetime, timedelta
-from typing import Literal, Any, Dict
+import tempfile
+import os
+from typing import Literal, Any, Dict, Optional
 
-from bs4 import BeautifulSoup
 from langchain_core.tools import tool
-# Using v1 for compatibility if needed
 from pydantic.v1 import BaseModel, Field
-from tqdm import tqdm
+
+# Import CASE validation utility, which is used by a tool
+try:
+    from case_utils.case_validate import validate
+    CASE_VALIDATION_AVAILABLE = True
+except ImportError:
+    CASE_VALIDATION_AVAILABLE = False
+    print("[WARNING] [tools.py] 'case-utils' package not found. The 'validate_case_jsonld' tool will be disabled.")
 
 # =============================================================================
 # Agentic Tools
@@ -267,3 +273,40 @@ def generate_uuid(entity_type: str) -> str:
         error_msg = f"Error generating UUID: {str(e)}"
         print(f"[UUID TOOL ERROR] {error_msg}")
         return error_msg
+
+
+@tool
+def validate_case_jsonld(input_data: str, case_version: Optional[str] = "case-1.4.0") -> str:
+    """Validate CASE/UCO JSON-LD data and return validation results"""
+    if not CASE_VALIDATION_AVAILABLE:
+        return "Error: case-utils package not available for validation"
+    
+    temp_files = []
+    try:
+        # Handle input
+        if input_data.strip().startswith(("{", "[")):
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonld", delete=False) as f:
+                f.write(input_data)
+                temp_files.append(f.name)
+                file_paths = [f.name]
+        else:
+            file_paths = [input_data]
+
+        # Validate using case-utils
+        result = validate(
+            input_file=file_paths,
+            case_version=case_version,
+            review_tbox=False,
+            supplemental_graphs=None,
+        )
+
+        conforms = getattr(result, "conforms", False)
+        results_text = getattr(result, "text", None)
+        
+        # Return validation report
+        if isinstance(results_text, str) and results_text.strip():
+            return results_text
+        else:
+            return f"Validation {'PASSED' if conforms else 'FAILED'}: Unable to parse detailed results"
+    except Exception as e:
+        return f"Error during validation: {str(e)}"
