@@ -80,23 +80,22 @@ class CaseUcoAnalyzer:
             return
 
         print("Loading CASE/UCO ontologies in parallel...")
-        total_ontologies = len(self.uco_urls)
-        
-        # Use ThreadPoolExecutor for parallel loading with optimized workers
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+
+        # Use ThreadPoolExecutor for parallel loading
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             # Submit all download tasks
             future_to_name = {
-                executor.submit(self._load_single_ontology, name, url): name 
+                executor.submit(self._load_single_ontology, name, url): name
                 for name, url in self.uco_urls.items()
             }
-            
+
             # Collect results as they complete
             loaded_count = 0
             failed_urls = []
-            
+
             for future in concurrent.futures.as_completed(future_to_name):
                 success, name, data, error = future.result()
-                
+
                 if success:
                     # Parse the ontology data
                     try:
@@ -104,26 +103,27 @@ class CaseUcoAnalyzer:
                         loaded_count += 1
                     except Exception as parse_error:
                         print(f"  ❌ Failed to parse {name}: {parse_error}")
-                        failed_urls.append((name, future_to_name[future], str(parse_error)))
+                        failed_urls.append(
+                            (name, future_to_name[future], str(parse_error)))
                 else:
                     failed_urls.append((name, future_to_name[future], error))
 
         print(f"\nLoaded {loaded_count}/{len(self.uco_urls)} ontologies")
-        
+
         # If some ontologies failed, show details but continue
         if failed_urls:
             print(f"\n⚠️ {len(failed_urls)} ontologies failed to load:")
             for name, url, error in failed_urls:
                 print(f"  - {name}: {error}")
             print("Continuing with successfully loaded ontologies...")
-        
+
         # Only proceed if we loaded at least some ontologies
         if loaded_count == 0:
-            raise Exception("Failed to load any CASE/UCO ontologies. Check network connectivity.")
-        
+            raise Exception(
+                "Failed to load any CASE/UCO ontologies. Check network connectivity.")
+
         self.loaded = True
         self._build_caches()
-
 
     def _build_caches(self):
         """Build internal caches for classes and properties."""
@@ -302,7 +302,8 @@ class CaseUcoAnalyzer:
         # Process inherited properties
         for prop in properties['inherited']:
             constraints = prop['constraints']
-            source_class = prop['source'].replace('inherited_from_', '') if 'inherited_from_' in prop['source'] else 'Inherited'
+            source_class = prop['source'].replace(
+                'inherited_from_', '') if 'inherited_from_' in prop['source'] else 'Inherited'
             shacl_properties[prop['name']] = {
                 'sourceClass': source_class,
                 'propertyType': prop['type'],

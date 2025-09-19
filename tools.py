@@ -49,9 +49,9 @@ def analyze_case_uco_class(class_name: str, output_format: str = "markdown") -> 
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
             print("[INFO] [Tools] Initializing CASE/UCO analyzer (first time only)...")
-            # Use fast analyzer for quick startup
-            from case_uco_fast import get_fast_analyzer
-            analyzer = get_fast_analyzer()
+            # Use full analyzer for complete SHACL property analysis
+            from case_uco import CaseUcoAnalyzer
+            analyzer = CaseUcoAnalyzer()
             globals()["_case_uco_analyzer"] = analyzer
             print("[SUCCESS] [Tools] CASE/UCO analyzer ready")
 
@@ -132,8 +132,8 @@ def list_case_uco_classes(filter_term: str = "") -> str:
     try:
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
-            from case_uco_fast import get_fast_analyzer
-            analyzer = get_fast_analyzer()
+            from case_uco import CaseUcoAnalyzer
+            analyzer = CaseUcoAnalyzer()
             globals()["_case_uco_analyzer"] = analyzer
         classes = analyzer.list_all_classes()
         if filter_term:
@@ -160,8 +160,8 @@ def analyze_case_uco_facets() -> str:
     try:
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
-            from case_uco_fast import get_fast_analyzer
-            analyzer = get_fast_analyzer()
+            from case_uco import CaseUcoAnalyzer
+            analyzer = CaseUcoAnalyzer()
             globals()["_case_uco_analyzer"] = analyzer
         facet_analysis = analyzer.analyze_facets()
         result = f"CASE/UCO Facet Analysis:\n"
@@ -189,8 +189,8 @@ def analyze_case_uco_relationships() -> str:
     try:
         analyzer = globals().get("_case_uco_analyzer")
         if analyzer is None:
-            from case_uco_fast import get_fast_analyzer
-            analyzer = get_fast_analyzer()
+            from case_uco import CaseUcoAnalyzer
+            analyzer = CaseUcoAnalyzer()
             globals()["_case_uco_analyzer"] = analyzer
         relationship_analysis = analyzer.analyze_relationships()
         result = f"CASE/UCO Relationship Analysis:\n"
@@ -283,7 +283,7 @@ def validate_case_jsonld(input_data: str, case_version: Optional[str] = "case-1.
     """Validate CASE/UCO JSON-LD data and return validation results"""
     if not CASE_VALIDATION_AVAILABLE:
         return "Error: case-utils package not available for validation"
-    
+
     temp_files = []
     try:
         # Handle input
@@ -305,7 +305,7 @@ def validate_case_jsonld(input_data: str, case_version: Optional[str] = "case-1.
 
         conforms = getattr(result, "conforms", False)
         results_text = getattr(result, "text", None)
-        
+
         # Return validation report
         if isinstance(results_text, str) and results_text.strip():
             return results_text

@@ -21,7 +21,6 @@ class State(_BaseState, total=False):
     """Represents the complete state of the agentic workflow."""
     # Core data fields
     ontologyMap: Dict[str, Any]
-    ontologyMarkdown: str
     customFacets: Dict[str, Any]
     customState: Dict[str, Any]
     jsonldGraph: Dict[str, Any]
