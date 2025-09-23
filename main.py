@@ -37,7 +37,7 @@ async def startup_event():
             os.environ["PHOENIX_API_KEY"] = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJBcGlLZXk6NSJ9.GFVSfOg--1GBYP9oiMSRF93J2Lq31H14pGOnk5pnQVo"
 
             tracer_provider = register(
-                project_name="forensic-agent-system",
+                project_name="case-uco-ontology-mapping-agent",
                 endpoint="https://app.phoenix.arize.com/s/ktamsik101/v1/traces",
                 auto_instrument=True
             )

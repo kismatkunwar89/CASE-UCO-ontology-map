@@ -21,6 +21,7 @@ class State(_BaseState, total=False):
     """Represents the complete state of the agentic workflow."""
     # Core data fields
     ontologyMap: Dict[str, Any]
+    ontologyMarkdown: str
     customFacets: Dict[str, Any]
     customState: Dict[str, Any]
     jsonldGraph: Dict[str, Any]
@@ -51,6 +52,7 @@ class State(_BaseState, total=False):
     hallucinationHistory: List[Dict[str, Any]]
     layer2_feedback_history: List[str]
     layer2_final_status: str
+    ttlDefinitions: str
 
     # Memory Architecture Fields
     memory_patterns: Dict[str, Any]
@@ -64,3 +66,53 @@ class State(_BaseState, total=False):
     current_worker: str
     workflow_stage: str
     learningContext: str
+
+    # Raw input capture (optional)
+    rawInputJSON: Any
+    inputFormat: str  # "json" | "text"
+    uuidPlan: list    # per-record planned UUIDs
+
+    # Validation status fields
+    l1_valid: bool
+    l2_valid: bool
+
+
+# =============================================================================
+# DEFAULT STATE VALUES
+# =============================================================================
+
+DEFAULT_STATE = {
+    "messages": [],
+    "input_artifacts": None,
+    "case_version": "case-1.4.0",
+    "ontology_done": False,
+    "custom_facets_done": False,
+    "graph_complete": False,
+    "l1_valid": False,
+    "l2_valid": False,             # Critical: prevents KeyError
+    "layer2_attempts": 0,          # Single counter key
+    "validator_feedback": [],
+    "hallucination_feedback": [],
+    "customFacetAttempts": 0,
+    "graphGeneratorAttempts": 0,
+    "validationAttempts": 0,
+    "customFacetErrors": [],
+    "graphGeneratorErrors": [],
+    "validationErrors": [],
+    "hallucinationErrors": [],
+    "validation_result": {},
+    "validation_feedback": "",
+    "validationHistory": [],
+    "hallucination_result": {},
+    "hallucinationAttempts": 0,
+    "hallucinationHistory": [],
+    "layer2_feedback_history": [],
+    "layer2_final_status": "",
+    "supervisor_decisions": [],
+    "current_worker": "",
+    "workflow_stage": "",
+    "learningContext": "",
+    "rawInputJSON": None,
+    "inputFormat": "json",
+    "uuidPlan": [],
+}

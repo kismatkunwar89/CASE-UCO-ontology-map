@@ -335,8 +335,17 @@ class CaseUcoAnalyzer:
         inherited_props = []
         semantic_props = []
 
+        # Check if this class is already a facet
+        is_facet = class_name.endswith('Facet')
+
         # Facet properties
-        facet_name = f"{class_name}Facet"
+        if is_facet:
+            # If this is already a facet, look for properties directly on it
+            facet_name = class_name
+        else:
+            # If this is a regular class, look for its corresponding facet
+            facet_name = f"{class_name}Facet"
+
         facet_prop_names = set()  # Track names to avoid duplicates
 
         if facet_name in self._class_cache:

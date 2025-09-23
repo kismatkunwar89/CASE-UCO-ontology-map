@@ -169,10 +169,17 @@ if run_analysis and input_artifacts.strip():
             progress_bar = st.progress(0)
             status_text = st.empty()
 
+            # Try to parse as JSON; if it fails, send as text
+            parsed = None
+            try:
+                parsed = json.loads(input_artifacts)
+            except Exception:
+                pass
+
             # Prepare API request data
             api_data = {
                 "user_identifier": user_identifier,
-                "input_artifacts": input_artifacts
+                "input_artifacts": parsed if parsed is not None else input_artifacts
             }
 
             # Make streaming request to FastAPI server

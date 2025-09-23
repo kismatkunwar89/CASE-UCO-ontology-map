@@ -19,27 +19,79 @@ from agents.hallucination_checker import hallucination_check_node
 # =============================================================================
 
 
+from memory import update_memory_context
+from config import (
+    MAX_CUSTOM_FACET_ATTEMPTS,
+    MAX_GRAPH_GENERATOR_ATTEMPTS,
+    MAX_VALIDATION_ATTEMPTS
+)
 def route_supervisor(state: State) -> str:
-    """Routes from the supervisor to the appropriate worker node or ends."""
+    """
+    The central supervisor router that directs the workflow and integrates memory.
+    This function contains the primary routing logic for the agentic graph.
+    """
+    # Update memory context first
+    memory_context = update_memory_context(state)
+    state["memory_context"] = memory_context
 
-    # --- GUARDRAIL IMPLEMENTATION ---
-    # First, check for a terminal failure state before asking the LLM.
-    graph_attempts = state.get("graphGeneratorAttempts", 0)
-    if graph_attempts >= MAX_GRAPH_GENERATOR_ATTEMPTS:
-        print("[GUARDRAIL] Max graph generator attempts reached. Moving to validator.")
-        return "validator_node"  # Continue workflow, don't terminate
-
-    # If no terminal condition is met, proceed with LLM-based routing.
-    messages = [
-        {"role": "system", "content": SUPERVISOR_AGENT_PROMPT}] + state["messages"]
-    response = llm.with_structured_output(Router).invoke(messages)
-
-    decision = response.get("next")
-    if decision == "FINISH":
-        print("[INFO] [Supervisor] Task complete. Terminating.")
+    # --- NEW GUARDRAIL: Check for critical errors from previous steps ---
+    if state.get("customFacetErrors") or state.get("graphGeneratorErrors") or "error" in state.get("ontologyMap", {}):
+        print("❌ [ROUTER] Critical error detected in a previous step. Terminating workflow.")
         return "__end__"
 
-    return decision
+    # Get the latest message to understand the current context
+    messages = state.get("messages", [])
+    
+    # Determine the next step based on the current state
+    ontology_complete = bool(state.get("ontologyMap") and state.get("ontologyMarkdown"))
+    custom_facets_complete = state.get("customFacets") is not None
+    graph_complete = bool(state.get("jsonldGraph"))
+    validation_complete = state.get("validation_result", {}).get("is_clean", False)
+
+    # Get attempt counters
+    custom_attempts = state.get("customFacetAttempts", 0)
+    graph_attempts = state.get("graphGeneratorAttempts", 0)
+    validation_attempts = state.get("validationAttempts", 0)
+
+    # --- Deterministic Routing Logic ---
+    if not ontology_complete:
+        print("🎯 [ROUTER] State: Ontology not complete. -> ontology_research_node")
+        return "ontology_research_node"
+
+    if not custom_facets_complete:
+        if custom_attempts < MAX_CUSTOM_FACET_ATTEMPTS:
+            print("🎯 [ROUTER] State: Custom facets not complete. -> custom_facet_node")
+            return "custom_facet_node"
+        else:
+            print("⚠️ [ROUTER] State: Max custom facet attempts reached. -> graph_generator_node")
+            return "graph_generator_node"
+
+    if not graph_complete:
+        if graph_attempts < MAX_GRAPH_GENERATOR_ATTEMPTS:
+            print("🎯 [ROUTER] State: Graph not complete. -> graph_generator_node")
+            return "graph_generator_node"
+        else:
+            print("⚠️ [ROUTER] State: Max graph generator attempts reached. -> validator_node")
+            return "validator_node"
+
+    if not validation_complete:
+        if validation_attempts < MAX_VALIDATION_ATTEMPTS:
+            # If graph is complete but validation failed, we might need to go back
+            validation_feedback = state.get("validation_feedback", "")
+            if validation_feedback:
+                 print("🎯 [ROUTER] State: Validation failed with feedback. -> graph_generator_node")
+                 return "graph_generator_node"
+            else:
+                 print("🎯 [ROUTER] State: Graph not validated. -> validator_node")
+                 return "validator_node"
+        else:
+            print("⚠️ [ROUTER] State: Max validation attempts reached. -> __end__")
+            return "__end__"
+            
+    # If all steps are complete, finish the workflow
+    print("✅ [ROUTER] State: All steps complete. -> __end__")
+    return "__end__"
+
 
 
 def route_after_validation(state: State) -> Literal["hallucination_check_node", "supervisor", "__end__"]:

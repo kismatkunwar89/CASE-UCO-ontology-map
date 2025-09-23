@@ -20,7 +20,18 @@ def _msg_text(msg):
 
 
 def _get_input_artifacts(state):
-    """Extract input artifacts from the state messages."""
+    """Extract input artifacts from the state messages, rawInputJSON, or input_artifacts."""
+    # First try rawInputJSON
+    raw = state.get("rawInputJSON")
+    if raw is None:
+        raw = state.get("input_artifacts")  # fallback to input_artifacts
+    if raw is not None:
+        # Convert to string if it's a dict/list
+        if isinstance(raw, (dict, list)):
+            return json.dumps(raw, indent=2)
+        return str(raw)
+
+    # Fallback to messages if available
     if "messages" in state and state["messages"]:
         first_msg = state["messages"][0]
         return _msg_text(first_msg)
@@ -35,14 +46,24 @@ RE_FENCED_JSON = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 def parse_ontology_response(content: str) -> Dict[str, Any]:
-    """Parse the LLM response to extract the JSON block for ontology mapping."""
-    m = RE_FENCED_JSON.search(content)
-    if m:
-        try:
-            data = json.loads(m.group(1))
-            return data
-        except json.JSONDecodeError:
-            return {"error": "Malformed JSON block found in agent response."}
+    """
+    Parse the LLM response to extract the final JSON block for ontology mapping.
+    It specifically targets the *last* JSON block in the content.
+    """
+    # Find all non-overlapping matches of JSON blocks
+    matches = RE_FENCED_JSON.findall(content)
 
-    # Fallback if no JSON is found
+    if matches:
+        # The last match is assumed to be the correct analysis JSON block
+        last_json_block = matches[-1]
+        try:
+            data = json.loads(last_json_block)
+            return data
+        except json.JSONDecodeError as e:
+            # Provide more context in the error
+            error_message = f"Malformed JSON block found in agent response: {e}. Content: '{last_json_block[:200]}...'"
+            print(f"[ERROR] [Parser] {error_message}")
+            return {"error": error_message}
+
+    # Fallback if no JSON block is found at all
     return {"error": "No JSON block found in the agent response."}

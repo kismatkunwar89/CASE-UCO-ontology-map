@@ -5,6 +5,7 @@ Refactored from main.py to separate concerns and enable API integration.
 
 import os
 import uuid
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Generator, Dict, Any
@@ -14,6 +15,29 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 # --- Custom Module Imports ---
 from graph import builder
+from state import DEFAULT_STATE
+
+
+def _normalize_input(input_artifacts: Any) -> Dict[str, Any]:
+    """
+    Returns:
+      {
+        'as_text': str,     # what we feed the LLM as user message
+        'raw_json': Any,    # original object or None
+        'format': 'json' | 'text'
+      }
+    """
+    if isinstance(input_artifacts, (dict, list)):
+        return {
+            "as_text": json.dumps(input_artifacts, indent=2),
+            "raw_json": input_artifacts,
+            "format": "json",
+        }
+    return {
+        "as_text": str(input_artifacts),
+        "raw_json": None,
+        "format": "text",
+    }
 
 
 def generate_session_id(user_identifier: str = "user") -> str:
@@ -33,7 +57,7 @@ def ensure_session_directory() -> Path:
 
 def execute_forensic_analysis_session_stream(
     session_id: str,
-    input_artifacts: str
+    input_artifacts: Any
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Executes a complete forensic analysis workflow with isolated, persistent state.
@@ -62,9 +86,22 @@ def execute_forensic_analysis_session_stream(
 
         try:
             print("[INFO] Executing workflow stream...")
+            # Normalize input and prepare for agent execution
+            norm = _normalize_input(input_artifacts)
+
             # Execute the workflow.
+            # Start with DEFAULT_STATE to ensure all keys exist
+            initial_state = dict(DEFAULT_STATE)
+            # Merge request-specific fields
+            initial_state["messages"] = [
+                ("system", "If the user message is JSON, treat it as authoritative source data."),
+                ("user", norm["as_text"]),
+            ]
+            initial_state["rawInputJSON"] = norm["raw_json"]
+            initial_state["inputFormat"] = norm["format"]
+
             events = agent.stream(
-                {"messages": [("user", input_artifacts)]},
+                initial_state,
                 config=config,
                 stream_mode="values"
             )
@@ -150,7 +187,7 @@ def execute_forensic_analysis_session_stream(
 
 def execute_forensic_analysis_session(
     session_id: str,
-    input_artifacts: str,
+    input_artifacts: Any,
     show_all_steps: bool = False
 ) -> Dict[str, Any]:
     """
@@ -180,9 +217,22 @@ def execute_forensic_analysis_session(
 
         try:
             print("[INFO] Executing workflow stream...")
+            # Normalize input and prepare for agent execution
+            norm = _normalize_input(input_artifacts)
+
             # Execute the workflow.
+            # Start with DEFAULT_STATE to ensure all keys exist
+            initial_state = dict(DEFAULT_STATE)
+            # Merge request-specific fields
+            initial_state["messages"] = [
+                ("system", "If the user message is JSON, treat it as authoritative source data."),
+                ("user", norm["as_text"]),
+            ]
+            initial_state["rawInputJSON"] = norm["raw_json"]
+            initial_state["inputFormat"] = norm["format"]
+
             events = agent.stream(
-                {"messages": [("user", input_artifacts)]},
+                initial_state,
                 config=config,
                 stream_mode="values"
             )
@@ -217,7 +267,7 @@ def execute_forensic_analysis_session(
 # Legacy compatibility functions
 def call_forensic_analysis_with_session(
     user_identifier: str,
-    input_artifacts: str,
+    input_artifacts: Any,
     show_all_steps: bool = False
 ) -> Dict[str, Any]:
     """Creates a new session and runs the forensic analysis."""

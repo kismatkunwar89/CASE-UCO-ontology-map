@@ -3,7 +3,7 @@ import json
 import uuid
 import tempfile
 import os
-from typing import Literal, Any, Dict, Optional
+from typing import Literal, Any, Dict, Optional, List
 
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
@@ -15,6 +15,44 @@ try:
 except ImportError:
     CASE_VALIDATION_AVAILABLE = False
     print("[WARNING] [tools.py] 'case-utils' package not found. The 'validate_case_jsonld' tool will be disabled.")
+
+# =============================================================================
+# Deterministic UUID allocation helpers (non-tools)
+# =============================================================================
+
+
+def make_uuid(entity_type: str, prefix: str = "kb:") -> str:
+    """Generate a single UUID for an entity type."""
+    return f"{prefix}{entity_type}-{uuid.uuid4()}"
+
+
+def make_paired_ids(base_slug: str, prefix: str = "kb:") -> tuple[str, str]:
+    """Generate paired UUIDs for an object and its facet."""
+    u = str(uuid.uuid4())
+    return f"{prefix}{base_slug}-{u}", f"{prefix}{base_slug}facet-{u}"
+
+
+def plan_record_uuids(
+    record_count: int,
+    class_slugs: List[str],
+    facet_slugs: List[str],
+    prefix: str = "kb:"
+) -> List[Dict[str, str]]:
+    """Plan UUID allocation for multiple records with classes and facets."""
+    plan: List[Dict[str, str]] = []
+    facet_set = set(facet_slugs)
+    for _ in range(record_count):
+        rec: Dict[str, str] = {}
+        for cls in class_slugs:
+            facet_name = f"{cls}facet"
+            if facet_name in facet_set:
+                obj_id, facet_id = make_paired_ids(cls, prefix)
+                rec[cls] = obj_id
+                rec[facet_name] = facet_id
+            else:
+                rec[cls] = make_uuid(cls, prefix)
+        plan.append(rec)
+    return plan
 
 # =============================================================================
 # Agentic Tools
@@ -245,31 +283,32 @@ def generate_jsonld_graph(ontology_map: Dict[str, Any]) -> str:
 
 
 @tool
-def generate_uuid(entity_type: str) -> str:
-    """Generate RFC 4122 v4 compliant UUID for CASE/UCO entities.
+def generate_uuid(entity_type: str, prefix: str = "kb:") -> str:
+    """Generate an RFC 4122 v4 UUID-backed identifier for CASE/UCO entities.
 
-    CRITICAL: Each call generates a UNIQUE UUID, even for the same entity_type.
-    Use this tool for EVERY @id field in your JSON-LD output.
+    CRITICAL:
+    - Call this ONCE per node instance you emit (every object, every facet, every relationship/marking node).
+    - Each call returns a UNIQUE id, even for the same entity_type.
+    - Do NOT reuse or share suffixes between object and facet.
+    - The caller must ensure no duplicate @ids in @graph.
+
+    Returns: 'kb:<entity-type>-<uuidv4>' unless a custom prefix is provided.
 
     Args:
-        entity_type: The type of entity (e.g., 'file', 'relationship', 'filefacet')
+        entity_type: Lowercase slug for the node kind (e.g., 'file', 'filefacet', 'process', 'relationship').
+        prefix: Optional IRI prefix (defaults to 'kb:'). Example: 'kb:' or 'case-investigation:'.
 
     Returns:
-        A unique identifier string in format 'kb:<entity-type>-<UUIDv4>'
+        Complete identifier string in format '<prefix><entity-type>-<UUIDv4>'
 
     Examples:
-        - generate_uuid("file") → "kb:file-a1b2c3d4-e5f6-4567-8901-ef1234567890"
-        - generate_uuid("relationship") → "kb:relationship-b2c3d4e5-f6g7-5678-9012-fg2345678901"
-        - generate_uuid("filefacet") → "kb:filefacet-c3d4e5f6-g7h8-6789-0123-gh3456789012"
-
-    IMPORTANT: 
-    - Call this tool for EACH @id field, even if multiple entities have the same type
-    - Never reuse UUIDs - each entity must have a unique identifier
-    - The LLM will track which UUIDs to use for which entities
+        - generate_uuid("file") → "kb:file-f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        - generate_uuid("relationship") → "kb:relationship-123e4567-e89b-42d3-a456-426614174000"
+        - generate_uuid("filefacet", "kb:") → "kb:filefacet-9b2c1cbe-6b7a-4b2e-8a9b-5a9d8fe2a1c2"
     """
     try:
         uuid_v4 = str(uuid.uuid4())
-        result = f"kb:{entity_type}-{uuid_v4}"
+        result = f"{prefix}{entity_type}-{uuid_v4}"
         print(f"[UUID TOOL] Generated unique UUID: {result}")
         return result
     except Exception as e:

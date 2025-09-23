@@ -18,7 +18,7 @@ router = APIRouter()
 class AnalysisInput(BaseModel):
     """Pydantic model for analysis input data."""
     user_identifier: str
-    input_artifacts: str
+    input_artifacts: Any  # accepts dict, list, or string
 
 
 class HealthResponse(BaseModel):
