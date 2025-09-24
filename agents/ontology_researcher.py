@@ -45,17 +45,17 @@ graph_generator_llm = llm.bind_tools([generate_uuid])
 # =============================================================================
 
 
-def ontology_research_node(state: State) -> dict:
+def ontology_research_step_node(state: State) -> dict:
     """
     This node runs the self-contained ontology research agent.
 
-    It takes the initial user input, invokes the agent, waits for it to
-    complete its entire multi-step process, and then returns the final
-    Markdown and JSON report.
+    It takes the initial user input, invokes the agent to gather all the raw
+    research in a markdown format, and places that report into the state.
+    It does not perform any parsing.
     """
     # Check if the research has already been done to avoid re-running.
-    if state.get("ontologyMap"):
-        print("[INFO] [Ontology] Research already complete, skipping.")
+    if state.get("ontologyMarkdown"):
+        print("[INFO] [Ontology Researcher] Research already complete, skipping.")
         return {}
 
     # Extract the initial user query from the message history in the state.
@@ -69,33 +69,25 @@ def ontology_research_node(state: State) -> dict:
 
     # Handle cases where no input text is found.
     if not input_text:
-        error_message = "[ERROR] [Ontology] Could not find initial input in state."
+        error_message = "[ERROR] [Ontology Researcher] Could not find initial input in state."
         print(error_message)
         return {"messages": [HumanMessage(
                 content=error_message, name="ontology_research_agent")]}
 
     print(
-        f"[INFO] [Ontology] Mapping standard ontology for: {input_text[:60]}...")
+        f"[INFO] [Ontology Researcher] Mapping standard ontology for: {input_text[:60]}...")
 
     # --- Agent Invocation ---
-    # The .invoke() method runs the entire agent process from start to finish.
-    # It hides all intermediate steps (like the initial tool calls) and only
-    # returns the final result once the agent has finished its work.
-    # To see each step, you would use .stream() and loop through the results.
     result = ontology_research_agent.invoke(
         {"messages": [("user", input_text)]})
 
     # The final output from the agent is the last message in the sequence.
     agent_output = result["messages"][-1].content
 
-    # Parse the agent's final Markdown output into a structured dictionary.
-    ontology_map = parse_ontology_response(agent_output)
+    print("[SUCCESS] [Ontology Researcher] Research complete, returning markdown report.")
 
-    print("[SUCCESS] [Ontology] Research complete, updating state.")
-
-    # Update the state with the final results and return control to the supervisor.
+    # Update the state with the final markdown report.
     return {
             "ontologyMarkdown": agent_output,
-            "ontologyMap": ontology_map,
-            "messages": [HumanMessage(content="Ontology research complete, summary and markdown report generated.", name="ontology_research_agent")],
+            "messages": [HumanMessage(content="Ontology research complete, markdown report generated.", name="ontology_research_agent")],
         }

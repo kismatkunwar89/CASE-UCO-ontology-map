@@ -1,11 +1,20 @@
-from typing import List, Literal
+from typing import List, Literal, Dict, Any
 from typing_extensions import TypedDict
-from pydantic import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 
 # =============================================================================
 # Data Models for Agent Outputs
 # =============================================================================
 
+class OntologyAnalysis(BaseModel):
+    """Pydantic model for the structured ontology analysis data."""
+    artifacts: List[str] = Field(default=[], description="List of identified artifact types.")
+    classes: List[str] = Field(default=[], description="List of relevant CASE/UCO classes (observable objects).")
+    facets: List[str] = Field(default=[], description="List of applicable facets (property bundles).")
+    properties: Dict[str, List[str]] = Field(default={}, description="Dictionary mapping classes/facets to their relevant properties.")
+    relationships: List[Dict[str, Any]] = Field(default=[], description="List of identified relationships between objects.")
+    analysis: str = Field(default="", description="A 1-3 sentence summary of the mapping rationale.")
+    additional_details: Dict[str, Any] = Field(default={}, description="Additional context, including unmapped elements.")
 
 class ValidationResult(BaseModel):
     """Defines the structure for the output of the validator_node."""

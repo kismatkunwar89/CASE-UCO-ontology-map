@@ -70,7 +70,10 @@ class State(_BaseState, total=False):
     # Raw input capture (optional)
     rawInputJSON: Any
     inputFormat: str  # "json" | "text"
-    uuidPlan: list    # per-record planned UUIDs
+    uuidPlan: List[Dict[str, str]]    # per-record planned UUIDs
+    slotTypeMap: Dict[str, str]
+    recordFingerprints: List[str]
+    plannerVersion: str
 
     # Validation status fields
     l1_valid: bool
@@ -114,5 +117,8 @@ DEFAULT_STATE = {
     "learningContext": "",
     "rawInputJSON": None,
     "inputFormat": "json",
-    "uuidPlan": [],
+    "uuidPlan": None,
+    "slotTypeMap": {},
+    "recordFingerprints": [],
+    "plannerVersion": "v1",
 }

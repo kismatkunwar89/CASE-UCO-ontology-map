@@ -11,9 +11,10 @@ from config import (
     MAX_GRAPH_GENERATOR_ATTEMPTS,
     GRAPH_GENERATOR_AGENT_PROMPT
 )
-from tools import generate_uuid
+# Removed generate_uuid import - using deterministic UUID plan instead
 from utils import _get_input_artifacts
 from agents.hallucination_checker import FeedbackProcessingAgent, DynamicCorrectionAgent
+
 
 def format_hallucination_instructions(recent_feedbacks: List[str]) -> str:
     """Formats recent hallucination feedback into a detailed prompt section."""
@@ -31,6 +32,7 @@ def format_hallucination_instructions(recent_feedbacks: List[str]) -> str:
 """
     return instructions
 
+
 def graph_generator_node(state: State) -> dict:
     """
     Generates the main JSON-LD graph by combining ontology and custom facet data.
@@ -38,16 +40,19 @@ def graph_generator_node(state: State) -> dict:
     current_attempts = state.get("graphGeneratorAttempts", 0)
     graph_errors = state.get("graphGeneratorErrors", [])
 
-    print(f"[INFO] [Graph Generator] Attempt {current_attempts + 1}/{MAX_GRAPH_GENERATOR_ATTEMPTS}")
+    print(
+        f"[INFO] [Graph Generator] Attempt {current_attempts + 1}/{MAX_GRAPH_GENERATOR_ATTEMPTS}")
 
     if current_attempts >= MAX_GRAPH_GENERATOR_ATTEMPTS:
-        print(f"[WARNING] [Graph Generator] Max attempts reached. Generating fallback response.")
+        print(
+            f"[WARNING] [Graph Generator] Max attempts reached. Generating fallback response.")
         fallback_context = {}
         ontology_map = state.get("ontologyMap", {})
         if ontology_map and "context" in ontology_map:
             fallback_context = ontology_map["context"]
         else:
-            fallback_context = {"kb": "http://example.org/kb/", "xsd": "http://www.w3.org/2001/XMLSchema#"}
+            fallback_context = {"kb": "http://example.org/kb/",
+                                "xsd": "http://www.w3.org/2001/XMLSchema#"}
         fallback_graph = {
             "@context": fallback_context,
             "@graph": [],
@@ -70,12 +75,14 @@ def graph_generator_node(state: State) -> dict:
     learning_context = state.get("learningContext", "")
     memory_context = state.get("memory_context", "")
     layer2_feedback_history = state.get("layer2_feedback_history", [])
+    uuid_plan = state.get("uuidPlan", [])
 
     error_feedback = ""
     if graph_errors:
         error_feedback = f"\n\nPREVIOUS ERRORS TO CONSIDER:\n{chr(10).join(graph_errors[-2:])}\n\nPlease fix these issues in your JSON-LD generation."
 
-    dynamic_instructions = format_hallucination_instructions(layer2_feedback_history)
+    dynamic_instructions = format_hallucination_instructions(
+        layer2_feedback_history)
 
     prompt = f"""
 ## STANDARD ONTOLOGY KEYS (from Agent 1):
@@ -90,6 +97,9 @@ def graph_generator_node(state: State) -> dict:
 ## ONTOLOGY RESEARCH CONTEXT (FULL markdown from Agent 1):
 {ontology_markdown}
 
+## DETERMINISTIC UUID PLAN (MANDATORY - USE THESE EXACT IDs):
+{json.dumps(uuid_plan, indent=2)}
+
 ## VALIDATION FEEDBACK FOR CORRECTION:
 {validation_feedback}
 
@@ -97,31 +107,26 @@ def graph_generator_node(state: State) -> dict:
 
 {dynamic_instructions}
 
+## CRITICAL UUID INSTRUCTIONS:
+- You MUST use the exact @id values provided in the UUID PLAN above
+- Do NOT generate new UUIDs or modify the provided IDs
+- Each record should use the corresponding UUIDs from the plan
+- The UUID plan ensures stable IDs across correction loops
+- Failure to use the provided UUIDs will cause validation errors
+
 ## INSTRUCTIONS:
-Combine the standard ontology mapping with the custom facets into a unified JSON-LD structure.
-... (instructions as before) ...
+Combine the standard ontology mapping with the custom facets into a unified JSON-LD structure using the deterministic UUID plan.
 """
 
     try:
-        graph_generator_llm = llm.bind_tools([generate_uuid])
+        # Use standard LLM without tool binding since we have deterministic UUIDs
         system_content = GRAPH_GENERATOR_AGENT_PROMPT
-        response = graph_generator_llm.invoke([
+        response = llm.invoke([
             {"role": "system", "content": system_content},
             {"role": "user", "content": prompt}
         ])
 
-        if response.tool_calls:
-            uuids = {tool_call["id"]: generate_uuid.invoke(tool_call["args"]) for tool_call in response.tool_calls}
-            uuid_instructions = f'''Use these UUIDs: {json.dumps(uuids, indent=2)}'''
-            final_response = llm.invoke([
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": prompt},
-                response,
-                {"role": "tool", "content": uuid_instructions}
-            ])
-            graph_out = final_response.content
-        else:
-            graph_out = response.content
+        graph_out = response.content
 
         json_obj = None
         m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", graph_out, re.DOTALL)
@@ -136,15 +141,18 @@ Combine the standard ontology mapping with the custom facets into a unified JSON
         json_obj = json.loads(json_content)
 
         if "@context" not in json_obj or "@graph" not in json_obj:
-            raise ValueError("Invalid JSON-LD structure: missing @context or @graph")
+            raise ValueError(
+                "Invalid JSON-LD structure: missing @context or @graph")
 
         if layer2_feedback_history:
             correction_agent = DynamicCorrectionAgent(llm)
             original_input = _get_input_artifacts(state)
             for feedback in layer2_feedback_history:
-                json_obj = correction_agent.apply_corrections(json_obj, feedback, original_input)
+                json_obj = correction_agent.apply_corrections(
+                    json_obj, feedback, original_input)
 
-        print(f"[SUCCESS] [Graph Generator] Successfully generated JSON-LD with {len(json_obj.get('@graph', []))} entities")
+        print(
+            f"[SUCCESS] [Graph Generator] Successfully generated JSON-LD with {len(json_obj.get('@graph', []))} entities")
 
         return {
             "jsonldGraph": json_obj,

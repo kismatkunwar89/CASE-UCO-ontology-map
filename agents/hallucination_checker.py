@@ -151,7 +151,7 @@ def hallucination_check_node(state: State) -> dict:
     is_clean = result.hallucinations_detected == "no"
 
     update = {
-        "hallucination_result": result.model_dump(),
+        "hallucination_result": result.dict(),
         "layer2_attempts": current_attempts + 1,
         "l2_valid": bool(result.validation_decision == "PASS"),
     }

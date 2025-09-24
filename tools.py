@@ -7,6 +7,7 @@ from typing import Literal, Any, Dict, Optional, List
 
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
+from schemas import OntologyAnalysis
 
 # Import CASE validation utility, which is used by a tool
 try:
@@ -44,7 +45,7 @@ def plan_record_uuids(
     for _ in range(record_count):
         rec: Dict[str, str] = {}
         for cls in class_slugs:
-            facet_name = f"{cls}facet"
+            facet_name = f"{cls}Facet"
             if facet_name in facet_set:
                 obj_id, facet_id = make_paired_ids(cls, prefix)
                 rec[cls] = obj_id
@@ -274,6 +275,22 @@ class GenerateJsonldGraphInput(BaseModel):
     """Input schema for the generate_jsonld_graph tool."""
     ontology_map: Dict[str, Any] = Field(
         ..., description="Dictionary containing parsed ontology information")
+
+class SubmitOntologyAnalysisInput(BaseModel):
+    """Input schema for the submit_ontology_analysis tool."""
+    markdown_report: str = Field(description="The complete, human-readable Markdown report of the ontology analysis.")
+    analysis_data: OntologyAnalysis = Field(description="The structured data containing the complete analysis.")
+
+@tool("submit_ontology_analysis", args_schema=SubmitOntologyAnalysisInput)
+def submit_ontology_analysis(markdown_report: str, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Submits the final ontology analysis, including the detailed Markdown report
+    and the structured analysis data. This tool should be called only once, at the
+    very end of the ontology research process.
+    """
+    return {"markdown_report": markdown_report, "analysis_data": analysis_data}
+
+
 
 
 @tool("generate_jsonld_graph", args_schema=GenerateJsonldGraphInput)

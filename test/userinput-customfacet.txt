@@ -1,0 +1,70 @@
+ORIGINAL USER INPUT:
+If the user message is JSON, treat it as authoritative source data.
+
+STANDARD ONTOLOGY KEYS FROM AGENT 1: {
+    "artifacts": [
+        "WindowsPrefetch",
+        "Process",
+        "Application"
+    ],
+    "classes": [
+        "WindowsPrefetch",
+        "Process",
+        "Application"
+    ],
+    "facets": [
+        "WindowsPrefetchFacet",
+        "ProcessFacet",
+        "ApplicationFacet"
+    ],
+    "properties": {
+        "WindowsPrefetch": [
+            "applicationFileName",
+            "firstRun",
+            "lastRun",
+            "timesExecuted",
+            "prefetchHash"
+        ],
+        "Process": [
+            "pid",
+            "arguments",
+            "creatorUser",
+            "currentWorkingDirectory",
+            "exitTime"
+        ],
+        "Application": [
+            "applicationIdentifier",
+            "numberOfLaunches",
+            "operatingSystem",
+            "version"
+        ]
+    },
+    "relationships": [
+        {
+            "type": "hasFacet",
+            "source": "WindowsPrefetch",
+            "target": "WindowsPrefetchFacet"
+        },
+        {
+            "type": "hasFacet",
+            "source": "Process",
+            "target": "ProcessFacet"
+        },
+        {
+            "type": "hasFacet",
+            "source": "Application",
+            "target": "ApplicationFacet"
+        }
+    ],
+    "analysis": "The analysis identifies key Windows Prefetch records and their associated properties, which are critical for understanding application execution history.",
+    "additional_details": {
+        "note": "The mapping is based on the presence of specific keys in the input data.",
+        "unmappedElements": [],
+        "originalRecord": "{\"applicationFileName\":\"example.exe\",\"firstRun\":\"2023-01-01T12:00:00Z\",\"lastRun\":\"2023-01-10T12:00:00Z\",\"timesExecuted\":5,\"prefetchHash\":\"abc12345\"}"
+    }
+}
+
+
+Analyze the original user input independently and determine what custom facets are needed.
+Compare with the standard ontology mapping and use your reasoning to create appropriate custom structures.
+If no custom facets are needed, return empty JSON structures for "customFacets" and "customState".
