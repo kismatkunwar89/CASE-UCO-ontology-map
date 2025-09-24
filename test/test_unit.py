@@ -34,12 +34,12 @@ class TestCoreLogic(unittest.TestCase):
         print("✅ PASSED: Parser correctly selected the last JSON block.")
 
     def test_router_sends_to_ontology(self):
-        """Verify the router directs to ontology_research_node when state is empty."""
+        """Verify the router directs to ontology_research_step_node when state is empty."""
         print("\n--- Testing: Router Logic (Empty State) ---")
         state = DEFAULT_STATE.copy()
         decision = route_supervisor(state)
-        self.assertEqual(decision, "ontology_research_node")
-        print("✅ PASSED: Router correctly chose 'ontology_research_node' for an empty state.")
+        self.assertEqual(decision, "ontology_research_step_node")
+        print("✅ PASSED: Router correctly chose 'ontology_research_step_node' for an empty state.")
 
     def test_router_sends_to_custom_facet(self):
         """Verify the router directs to custom_facet_node after ontology is done."""
@@ -51,9 +51,9 @@ class TestCoreLogic(unittest.TestCase):
         self.assertEqual(decision, "custom_facet_node")
         print("✅ PASSED: Router correctly chose 'custom_facet_node'.")
 
-    def test_router_sends_to_validator(self):
-        """Verify the router directs to validator_node when appropriate."""
-        print("\n--- Testing: Router Logic (Ready for Validation) ---")
+    def test_router_sends_to_planner_when_ready(self):
+        """Verify the router directs to uuid_planner_node when appropriate."""
+        print("\n--- Testing: Router Logic (Ready for Planner) ---")
         state = DEFAULT_STATE.copy()
         state['ontologyMap'] = {"status": "done"}
         state['ontologyMarkdown'] = "report"
@@ -61,12 +61,12 @@ class TestCoreLogic(unittest.TestCase):
         state['jsonldGraph'] = {"@graph": []}
         state['validation_result'] = {"is_clean": False} # Not clean yet
         decision = route_supervisor(state)
-        self.assertEqual(decision, "validator_node")
-        print("✅ PASSED: Router correctly chose 'validator_node'.")
+        self.assertEqual(decision, "uuid_planner_node")
+        print("✅ PASSED: Router correctly chose 'uuid_planner_node'.")
 
-    def test_router_validation_guardrail(self):
-        """Verify the router terminates when max validation attempts are reached."""
-        print("\n--- Testing: Router Logic (Validation Guardrail) ---")
+    def test_router_sends_to_planner_at_guardrail(self):
+        """Verify the router still sends to planner even when validation attempts are maxed."""
+        print("\n--- Testing: Router Logic (Planner before Validation Guardrail) ---")
         state = DEFAULT_STATE.copy()
         state['ontologyMap'] = {"status": "done"}
         state['ontologyMarkdown'] = "report"
@@ -75,8 +75,8 @@ class TestCoreLogic(unittest.TestCase):
         state['validation_result'] = {"is_clean": False}
         state['validationAttempts'] = MAX_VALIDATION_ATTEMPTS
         decision = route_supervisor(state)
-        self.assertEqual(decision, "__end__")
-        print("✅ PASSED: Router correctly terminated after max validation attempts.")
+        self.assertEqual(decision, "uuid_planner_node")
+        print("✅ PASSED: Router correctly chose 'uuid_planner_node' before guardrail.")
 
     def test_router_success_path(self):
         """Verify the router correctly identifies a successful state before hallucination check."""

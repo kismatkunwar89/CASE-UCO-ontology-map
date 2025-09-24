@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -119,10 +120,20 @@ def validator_node(state: State) -> dict:
         }
     else:
         print(f"[FAILURE] [Validator] Layer 1 validation failed: {final_feedback}")
-        return {
+        
+        # Extract UUIDs from the feedback string to request partial invalidation
+        uuids_to_invalidate = re.findall(r'kb:[a-zA-Z0-9_-]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', final_feedback)
+        
+        return_dict = {
             "validation_result": validation_result,
             "validation_feedback": final_feedback,
             "validationAttempts": current_attempts + 1,
             "validationHistory": updated_history,
             "messages": [HumanMessage(content=f"Layer 1 validation failed: {final_feedback}", name="validator_agent")]
         }
+        
+        if uuids_to_invalidate:
+            print(f"   - Found UUIDs to invalidate: {uuids_to_invalidate}")
+            return_dict["uuids_to_invalidate"] = uuids_to_invalidate
+            
+        return return_dict

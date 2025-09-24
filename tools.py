@@ -3,6 +3,7 @@ import json
 import uuid
 import tempfile
 import os
+import hashlib
 from typing import Literal, Any, Dict, Optional, List
 
 from langchain_core.tools import tool
@@ -21,6 +22,14 @@ except ImportError:
 # Deterministic UUID allocation helpers (non-tools)
 # =============================================================================
 
+# Namespaces for deterministic UUIDs
+NS_CASE = uuid.uuid5(uuid.NAMESPACE_DNS, 'case.uco.org')
+NS_RECORD = uuid.uuid5(NS_CASE, 'record')
+NS_SLOT = uuid.uuid5(NS_CASE, 'slot')
+
+def _uuid5(namespace: uuid.UUID, name: str) -> str:
+    """Generates a UUIDv5 from a namespace and a name."""
+    return str(uuid.uuid5(namespace, name))
 
 def make_uuid(entity_type: str, prefix: str = "kb:") -> str:
     """Generate a single UUID for an entity type."""
@@ -55,10 +64,15 @@ def plan_record_uuids(
         plan.append(rec)
     return plan
 
+def _generate_record_fingerprint(record: Dict[str, Any]) -> str:
+    """Generates a SHA-256 fingerprint for a record."""
+    canonical_json = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
 # =============================================================================
 # Agentic Tools
 # =============================================================================
-
 # Note: The 'case_uco' library is imported dynamically inside the tools
 # to avoid a hard dependency at the top level if it's not installed.
 

@@ -80,9 +80,9 @@ def route_supervisor(state: State) -> str:
                 "⚠️ [ROUTER] State: Max custom facet attempts reached. Proceeding without custom facets.")
             # Fall through to the next step even if custom facets fail
 
-    # --- NEW: Route to UUID Planner if no plan exists ---
-    if not state.get("uuidPlan"):
-        print("🎯 [ROUTER] State: UUID plan not found. -> uuid_planner_node")
+    # --- Route to UUID Planner if no plan has been created yet ---
+    if state.get("uuidPlan") is None:
+        print("🎯 [ROUTER] State: UUID plan is None, running planner. -> uuid_planner_node")
         return "uuid_planner_node"
 
     if not graph_complete:

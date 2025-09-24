@@ -15,6 +15,24 @@ from config import (
 from utils import _get_input_artifacts
 from agents.hallucination_checker import FeedbackProcessingAgent, DynamicCorrectionAgent
 
+def _merge_llm_output_into_skeleton(skeleton_graph, llm_graph):
+    """
+    Merges properties from the LLM's graph into the skeleton graph.
+    This ensures that no nodes are lost and that @id and @type are preserved.
+    """
+    skeleton_nodes_by_id = {node["@id"]: node for node in skeleton_graph.get("@graph", [])}
+    
+    for llm_node in llm_graph.get("@graph", []):
+        node_id = llm_node.get("@id")
+        if node_id in skeleton_nodes_by_id:
+            # Copy all properties from llm_node except @id and @type
+            for key, value in llm_node.items():
+                if key not in ["@id", "@type"]:
+                    skeleton_nodes_by_id[node_id][key] = value
+    
+    # The skeleton_graph is modified in place, but we return it for clarity
+    return skeleton_graph
+
 
 def format_hallucination_instructions(recent_feedbacks: List[str]) -> str:
     """Formats recent hallucination feedback into a detailed prompt section."""
@@ -76,6 +94,37 @@ def graph_generator_node(state: State) -> dict:
     memory_context = state.get("memory_context", "")
     layer2_feedback_history = state.get("layer2_feedback_history", [])
     uuid_plan = state.get("uuidPlan", [])
+    slot_type_map = state.get("slotTypeMap", {})
+
+    # --- Build Skeleton Graph ---
+    print("[INFO] [Graph Generator] Building skeleton graph from plan...")
+    skeleton_graph = {"@graph": []}
+    nodes_by_id = {}
+    if uuid_plan and slot_type_map:
+        # First, create all nodes
+        for record_plan in uuid_plan:
+            for slot_slug, slot_uuid in record_plan.items():
+                node = {
+                    "@id": slot_uuid,
+                    "@type": slot_type_map.get(slot_uuid, "uco-core:UcoObject")
+                }
+                skeleton_graph["@graph"].append(node)
+                nodes_by_id[slot_uuid] = node
+
+        # Second, link facets
+        for record_plan in uuid_plan:
+            parent_node_id = None
+            facet_ids = []
+            for slot_slug, slot_uuid in record_plan.items():
+                if "facet" not in slot_slug.lower():
+                    parent_node_id = slot_uuid
+                else:
+                    facet_ids.append({"@id": slot_uuid})
+            
+            if parent_node_id and facet_ids:
+                parent_node = nodes_by_id.get(parent_node_id)
+                if parent_node:
+                    parent_node["uco-core:hasFacet"] = facet_ids
 
     error_feedback = ""
     if graph_errors:
@@ -85,20 +134,18 @@ def graph_generator_node(state: State) -> dict:
         layer2_feedback_history)
 
     prompt = f"""
+## GRAPH SKELETON (Your starting point):
+Your task is to fill in the properties for each entity in this pre-built graph skeleton based on the other information provided.
+Do NOT add new entities. Do NOT change the @id or @type of existing entities.
+```json
+{json.dumps(skeleton_graph, indent=2)}
+```
+
 ## STANDARD ONTOLOGY KEYS (from Agent 1):
 {json.dumps(ontology_map, indent=2)}
 
 ## CUSTOM FACETS (from Agent 2):
 {json.dumps(custom_facets, indent=2)}
-
-## CUSTOM STATE:
-{json.dumps(custom_state, indent=2)}
-
-## ONTOLOGY RESEARCH CONTEXT (FULL markdown from Agent 1):
-{ontology_markdown}
-
-## DETERMINISTIC UUID PLAN (MANDATORY - USE THESE EXACT IDs):
-{json.dumps(uuid_plan, indent=2)}
 
 ## VALIDATION FEEDBACK FOR CORRECTION:
 {validation_feedback}
@@ -107,15 +154,17 @@ def graph_generator_node(state: State) -> dict:
 
 {dynamic_instructions}
 
-## CRITICAL UUID INSTRUCTIONS:
-- You MUST use the exact @id values provided in the UUID PLAN above
-- Do NOT generate new UUIDs or modify the provided IDs
-- Each record should use the corresponding UUIDs from the plan
-- The UUID plan ensures stable IDs across correction loops
-- Failure to use the provided UUIDs will cause validation errors
-
 ## INSTRUCTIONS:
-Combine the standard ontology mapping with the custom facets into a unified JSON-LD structure using the deterministic UUID plan.
+1.  Review the source data (in the ontology and custom facet maps).
+2.  For each entity in the GRAPH SKELETON, add the relevant properties and values.
+3.  Return the completed JSON-LD graph.
+
+## CRITICAL REMINDER ON PROPERTY PLACEMENT:
+- The MOST IMPORTANT rule is the separation of object and facet properties.
+- A property like `uco-observable:filePath` or `uco-observable:createdTime` MUST NOT appear on a `uco-observable:File` node.
+- These properties MUST be placed on the corresponding facet node (e.g., `uco-observable:FileFacet`).
+- The parent `File` node should ONLY contain the `uco-core:hasFacet` property pointing to its facets.
+- VIOLATING THIS RULE WILL CAUSE IMMEDIATE SYSTEM FAILURE. Double-check every property's location before outputting the graph.
 """
 
     try:
@@ -138,7 +187,30 @@ Combine the standard ontology mapping with the custom facets into a unified JSON
         if not json_content:
             raise ValueError("Empty JSON content received from LLM")
 
-        json_obj = json.loads(json_content)
+        llm_json_obj = json.loads(json_content)
+
+        # Merge the LLM's output into our skeleton to preserve all nodes
+        json_obj = _merge_llm_output_into_skeleton(skeleton_graph, llm_json_obj)
+
+        # Ensure the context is present in the final graph
+        if "@context" not in json_obj:
+            json_obj["@context"] = {
+                "case-investigation": "https://ontology.caseontology.org/case/investigation/",
+                "kb": "http://example.org/kb/",
+                "drafting": "http://example.org/ontology/drafting/",
+                "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+                "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                "uco-action": "https://ontology.unifiedcyberontology.org/uco/action/",
+                "core": "https://ontology.unifiedcyberontology.org/uco/core/",
+                "identity": "https://ontology.unifiedcyberontology.org/uco/identity/",
+                "location": "https://ontology.unifiedcyberontology.org/uco/location/",
+                "observable": "https://ontology.unifiedcyberontology.org/uco/observable/",
+                "tool": "https://ontology.unifiedcyberontology.org/uco/tool/",
+                "types": "https://ontology.unifiedcyberontology.org/uco/types/",
+                "vocabulary": "https://ontology.unifiedcyberontology.org/uco/vocabulary/",
+                "xsd": "http://www.w3.org/2001/XMLSchema#",
+                "dfc-ext": "https://www.w3.org/dfc-ext/"
+            }
 
         if "@context" not in json_obj or "@graph" not in json_obj:
             raise ValueError(
@@ -150,6 +222,26 @@ Combine the standard ontology mapping with the custom facets into a unified JSON
             for feedback in layer2_feedback_history:
                 json_obj = correction_agent.apply_corrections(
                     json_obj, feedback, original_input)
+
+        # Ensure the context is present in the final graph
+        if "@context" not in json_obj:
+            json_obj["@context"] = {
+                "case-investigation": "https://ontology.caseontology.org/case/investigation/",
+                "kb": "http://example.org/kb/",
+                "drafting": "http://example.org/ontology/drafting/",
+                "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+                "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                "uco-action": "https://ontology.unifiedcyberontology.org/uco/action/",
+                "core": "https://ontology.unifiedcyberontology.org/uco/core/",
+                "identity": "https://ontology.unifiedcyberontology.org/uco/identity/",
+                "location": "https://ontology.unifiedcyberontology.org/uco/location/",
+                "observable": "https://ontology.unifiedcyberontology.org/uco/observable/",
+                "tool": "https://ontology.unifiedcyberontology.org/uco/tool/",
+                "types": "https://ontology.unifiedcyberontology.org/uco/types/",
+                "vocabulary": "https://ontology.unifiedcyberontology.org/uco/vocabulary/",
+                "xsd": "http://www.w3.org/2001/XMLSchema#",
+                "dfc-ext": "https://www.w3.org/dfc-ext/"
+            }
 
         print(
             f"[SUCCESS] [Graph Generator] Successfully generated JSON-LD with {len(json_obj.get('@graph', []))} entities")

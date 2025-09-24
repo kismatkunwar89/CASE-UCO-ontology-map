@@ -78,6 +78,7 @@ class State(_BaseState, total=False):
     # Validation status fields
     l1_valid: bool
     l2_valid: bool
+    uuids_to_invalidate: List[str] | None
 
 
 # =============================================================================
@@ -121,4 +122,5 @@ DEFAULT_STATE = {
     "slotTypeMap": {},
     "recordFingerprints": [],
     "plannerVersion": "v1",
+    "uuids_to_invalidate": None,
 }
