@@ -1,0 +1,387 @@
+User
+
+You are a data synthesis expert. Your task is to read the provided markdown report, which contains a detailed analysis of forensic artifacts mapped to the CASE/UCO ontology.
+
+Based *only* on the information in the report, extract the data and structure it as a valid JSON object that conforms to the requested schema.
+
+- Reference output (structure is mandatory, empty containers allowed when there's no data):
+```
+{
+  "artifacts": ["Example Artifact"],
+  "classes": ["ExampleClass"],
+  "facets": ["ExampleFacet"],
+  "properties": {
+    "ExampleFacet": [
+      "exampleProperty",
+      "anotherProperty"
+    ]
+  },
+  "relationships": [],
+  "analysis": "Short 1-3 sentence summary tied directly to the report.",
+  "additional_details": {}
+}
+```
+
+- REQUIRED EXTRACTION RULES (follow exactly):
+  1. For every class or facet heading, create a corresponding key in `properties`. When a Markdown table titled "Property Shapes" is present, capture each entry under the `PROPERTY` column verbatim.
+  2. If a class or facet lacks a property table, give it an empty array (`[]`) in `properties`.
+  3. Always output `relationships` as an array (use `[]` when no relationships are described).
+  4. Always output `additional_details` as an object (use `{}` when no extra information exists).
+  5. Never omit any schema keys shown in the reference output.
+  6. Keep the `analysis` field to 1–3 sentences grounded strictly in the provided report.
+
+- The 'properties', 'relationships', and 'additional_details' fields are required. If there is no information for them in the report, you MUST populate them with empty values (e.g., {}, [], or a default note) rather than omitting them.
+- Carefully extract all classes, facets, properties, and relationships mentioned.
+
+
+user
+
+**Original User Input (for context):**
+```
+{
+  "artifact_type": "MFT Records",
+  "description": "Master File Table records containing filesystem metadata and file system structure information",
+  "source": "NTFS filesystem analysis",
+  "records": [
+    {
+      "EntryNumber": 42,
+      "SequenceNumber": 3,
+      "ParentEntryNumber": 5,
+      "FullPath": "\\Windows\\Prefetch\\MALICIOUS.EXE-12345678.pf",
+      "InUse": true,
+      "SI_Created": "2025-09-17T10:30:00Z",
+      "SI_Modified": "2025-09-17T10:35:15Z",
+      "SI_Accessed": "2025-09-17T10:35:15Z",
+      "FN_Created": "2025-09-17T10:30:00Z",
+      "FN_Modified": "2025-09-17T10:35:15Z"
+    },
+    {
+      "EntryNumber": 314,
+      "SequenceNumber": 1,
+      "ParentEntryNumber": 200,
+      "FullPath": "\\Users\\Alice\\Documents\\report.docx",
+      "InUse": true,
+      "SI_Created": "2024-10-05T09:12:00Z",
+      "SI_Modified": "2025-01-20T16:33:11Z",
+      "SI_Accessed": "2025-01-22T07:02:45Z",
+      "FN_Created": "2024-10-05T09:12:00Z",
+      "FN_Modified": "2025-01-20T16:33:11Z"
+    }
+  ]
+}
+```
+
+**Ontology Research Report to Synthesize:**
+```markdown
+# Digital Forensics Report on MFT Records
+
+## Artifact Type: MFT Records
+**Description:** Master File Table records containing filesystem metadata and file system structure information  
+**Source:** NTFS filesystem analysis
+
+### MFT Record Entries
+
+#### Entry 1
+- **Entry Number:** 42
+- **Sequence Number:** 3
+- **Parent Entry Number:** 5
+- **Full Path:** `\Windows\Prefetch\MALICIOUS.EXE-12345678.pf`
+- **In Use:** true
+- **SI Created:** 2025-09-17T10:30:00Z
+- **SI Modified:** 2025-09-17T10:35:15Z
+- **SI Accessed:** 2025-09-17T10:35:15Z
+- **FN Created:** 2025-09-17T10:30:00Z
+- **FN Modified:** 2025-09-17T10:35:15Z
+
+#### Entry 2
+- **Entry Number:** 314
+- **Sequence Number:** 1
+- **Parent Entry Number:** 200
+- **Full Path:** `\Users\Alice\Documents\report.docx`
+- **In Use:** true
+- **SI Created:** 2024-10-05T09:12:00Z
+- **SI Modified:** 2025-01-20T16:33:11Z
+- **SI Accessed:** 2025-01-22T07:02:45Z
+- **FN Created:** 2024-10-05T09:12:00Z
+- **FN Modified:** 2025-01-20T16:33:11Z
+
+---
+
+## CASE/UCO Ontology Classes and Facets
+
+### 1. MftRecordFacet
+**URI:** `https://ontology.unifiedcyberontology.org/uco/observable/MftRecordFacet`  
+**Description:** An MFT record facet is a grouping of characteristics unique to the details of a single file as managed in an NTFS master file table.
+
+#### Superclasses
+1. Facet
+2. UcoInherentCharacterizationThing
+3. UcoThing
+
+#### Property Shapes
+| PROPERTY | PROPERTY TYPE | DESCRIPTION | MIN COUNT | MAX COUNT | LOCAL RANGE | GLOBAL RANGE |
+|----------|---------------|-------------|-----------|-----------|-------------|--------------|
+| mftFileID | DatatypeProperty | Specifies the record number for the file within an NTFS filesystem. | None | 1 | integer | None |
+| mftFileNameAccessedTime | DatatypeProperty | The access date and time recorded in an MFT entry. | None | 1 | dateTime | None |
+| mftFileNameCreatedTime | DatatypeProperty | The creation date and time recorded in an MFT entry. | None | 1 | dateTime | None |
+| mftFileNameLength | DatatypeProperty | Specifies the length of an NTFS file name, in unicode characters. | None | 1 | integer | None |
+| mftFileNameModifiedTime | DatatypeProperty | The modification date and time recorded in an MFT entry. | None | 1 | dateTime | None |
+| mftFileNameRecordChangeTime | DatatypeProperty | The metadata modification date and time recorded in an MFT entry. | None | 1 | dateTime | None |
+| mftFlags | DatatypeProperty | Specifies basic permissions for the file (Read-Only, Hidden, etc.). | None | 1 | integer | None |
+| mftParentID | DatatypeProperty | Specifies the record number within an NTFS Master File Table that is the parent of this record. | None | 1 | integer | None |
+| mftRecordChangeTime | DatatypeProperty | The date and time at which an NTFS file metadata was last changed. | None | 1 | dateTime | None |
+| ntfsHardLinkCount | DatatypeProperty | Specifies the number of directory entries that reference this file. | None | 1 | integer | None |
+| ntfsOwnerID | DatatypeProperty | Specifies the identifier of the file owner, from the NTFS security descriptor. | None | 1 | string | None |
+| ntfsOwnerSID | DatatypeProperty | Specifies the security ID (key in the $SII Index and $SD Index) for the file. | None | 1 | string | None |
+
+---
+
+### 2. NTFSFile
+**URI:** `https://ontology.unifiedcyberontology.org/uco/observable/NTFSFile`  
+**Description:** An NTFS file is a New Technology File System (NTFS) file.
+
+#### Superclasses
+1. File
+2. Item
+3. FileSystemObject
+4. Observable
+5. UcoObject
+6. ObservableObject
+7. UcoThing
+
+#### Property Shapes
+| PROPERTY | PROPERTY TYPE | DESCRIPTION | MIN COUNT | MAX COUNT | LOCAL RANGE | GLOBAL RANGE |
+|----------|---------------|-------------|-----------|-----------|-------------|--------------|
+| entryID | DatatypeProperty | A unique identifier for the file within the filesystem. | None | 1 | integer | None |
+| accessedTime | DatatypeProperty | The date and time at which the Object was accessed. | None | 1 | dateTime | None |
+| allocationStatus | DatatypeProperty | The allocation status of a file. | None | 1 | string | None |
+| extension | DatatypeProperty | The file name extension: everything after the last period in the file name. | None | 1 | string | None |
+| fileName | DatatypeProperty | Specifies the name associated with a file in a filesystem. | None | None | string | None |
+| filePath | DatatypeProperty | Specifies the file path for the location of a file in a filesystem. | None | None | string | None |
+| isDirectory | DatatypeProperty | Specifies whether a file entry represents a directory. | None | None | boolean | None |
+| metadataChangeTime | DatatypeProperty | The date and time at which the file metadata was last changed. | None | 1 | dateTime | None |
+| modifiedTime | DatatypeProperty | The date and time at which the Object was last modified. | None | 1 | dateTime | None |
+| sizeInBytes | DatatypeProperty | The size of the data in bytes. | None | 1 | integer | None |
+
+---
+
+### 3. NTFSFileFacet
+**URI:** `https://ontology.unifiedcyberontology.org/uco/observable/NTFSFileFacet`  
+**Description:** An NTFS file facet is a grouping of characteristics unique to a file on an NTFS file system.
+
+#### Superclasses
+1. Facet
+2. UcoInherentCharacterizationThing
+3. UcoThing
+
+#### Property Shapes
+| PROPERTY | PROPERTY TYPE | DESCRIPTION | MIN COUNT | MAX COUNT | LOCAL RANGE | GLOBAL RANGE |
+|----------|---------------|-------------|-----------|-----------|-------------|--------------|
+| entryID | DatatypeProperty | A unique identifier for the file within the filesystem. | None | 1 | integer | None |
+| alternateDataStreams | ObjectProperty | Alternate data streams associated with the file. | None | None | AlternateDataStream | AlternateDataStream |
+
+---
+
+### 4. File
+**URI:** `https://ontology.unifiedcyberontology.org/uco/observable/File`  
+**Description:** A file is a computer resource for recording data discretely on a computer storage device.
+
+#### Superclasses
+1. Item
+2. FileSystemObject
+3. Observable
+4. UcoObject
+5. ObservableObject
+6. UcoThing
+
+#### Property Shapes
+| PROPERTY | PROPERTY TYPE | DESCRIPTION | MIN COUNT | MAX COUNT | LOCAL RANGE | GLOBAL RANGE |
+|----------|---------------|-------------|-----------|-----------|-------------|--------------|
+| accessedTime | DatatypeProperty | The date and time at which the Object was accessed. | None | 1 | dateTime | None |
+| allocationStatus | DatatypeProperty | The allocation status of a file. | None | 1 | string | None |
+| extension | DatatypeProperty | The file name extension: everything after the last period in the file name. | None | 1 | string | None |
+| fileName | DatatypeProperty | Specifies the name associated with a file in a filesystem. | None | None | string | None |
+| filePath | DatatypeProperty | Specifies the file path for the location of a file in a filesystem. | None | None | string | None |
+| sizeInBytes | DatatypeProperty | The size of the data in bytes. | None | 1 | integer | None |
+
+---
+
+### 5. FileSystem
+**URI:** `https://ontology.unifiedcyberontology.org/uco/observable/FileSystem`  
+**Description:** A file system is the process that manages how and where data on a storage medium is stored, accessed, and managed.
+
+#### Superclasses
+1. Item
+2. Observable
+3. UcoObject
+4. ObservableObject
+5. UcoThing
+
+#### Property Shapes
+| PROPERTY | PROPERTY TYPE | DESCRIPTION | MIN COUNT | MAX COUNT | LOCAL RANGE | GLOBAL RANGE |
+|----------|---------------|-------------|-----------|-----------|-------------|--------------|
+| clusterSize | DatatypeProperty | The size of cluster allocation units in a file system. | None | 1 | integer | None |
+| fileSystemType | DatatypeProperty | The specific type of a file system. | None | 1 | string | None |
+
+---
+
+### 6. FileSystemObject
+**URI:** `https://ontology.unifiedcyberontology.org/uco/observable/FileSystemObject`  
+**Description:** A file system object is an informational object represented and managed within a file system.
+
+#### Superclasses
+1. Item
+2. Observable
+3. UcoObject
+4. ObservableObject
+5. UcoThing
+
+#### Property Shapes
+| PROPERTY | PROPERTY TYPE | DESCRIPTION | MIN COUNT | MAX COUNT | LOCAL RANGE | GLOBAL RANGE |
+|----------|---------------|-------------|-----------|-----------|-------------|--------------|
+| name | DatatypeProperty | The name of a particular concept characterization. | 1 | 1 | string | None |
+
+--- 
+
+This report provides a comprehensive overview of the MFT records and their mapping to the CASE/UCO ontology, detailing the relevant classes, facets, and properties associated with the digital forensic artifacts identified.
+```
+
+ontology analysis
+
+{
+  "type": "function",
+  "function": {
+    "name": "OntologyAnalysis",
+    "description": "Pydantic model for the structured ontology analysis data.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "description": "List of identified artifact types.",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "classes": {
+          "type": "array",
+          "description": "List of relevant CASE/UCO classes (observable objects).",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "facets": {
+          "type": "array",
+          "description": "List of applicable facets (property bundles).",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "description": "Dictionary mapping classes/facets to their relevant properties.",
+          "default": {},
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "description": "List of identified relationships between objects.",
+          "default": [],
+          "items": {
+            "type": "object"
+          }
+        },
+        "analysis": {
+          "type": "string",
+          "description": "A 1-3 sentence summary of the mapping rationale.",
+          "default": ""
+        },
+        "additional_details": {
+          "type": "object",
+          "description": "Additional context, including unmapped elements.",
+          "default": {}
+        }
+      }
+    }
+  }
+}
+
+OUTPUT
+
+```json
+{
+  "artifacts": [
+    "MFT Records"
+  ],
+  "classes": [
+    "MftRecordFacet",
+    "NTFSFile",
+    "NTFSFileFacet",
+    "File",
+    "FileSystem",
+    "FileSystemObject"
+  ],
+  "facets": [
+    "MftRecordFacet",
+    "NTFSFileFacet"
+  ],
+  "properties": {
+    "MftRecordFacet": [
+      "mftFileID",
+      "mftFileNameAccessedTime",
+      "mftFileNameCreatedTime",
+      "mftFileNameLength",
+      "mftFileNameModifiedTime",
+      "mftFileNameRecordChangeTime",
+      "mftFlags",
+      "mftParentID",
+      "mftRecordChangeTime",
+      "ntfsHardLinkCount",
+      "ntfsOwnerID",
+      "ntfsOwnerSID"
+    ],
+    "NTFSFile": [
+      "entryID",
+      "accessedTime",
+      "allocationStatus",
+      "extension",
+      "fileName",
+      "filePath",
+      "isDirectory",
+      "metadataChangeTime",
+      "modifiedTime",
+      "sizeInBytes"
+    ],
+    "NTFSFileFacet": [
+      "entryID",
+      "alternateDataStreams"
+    ],
+    "File": [
+      "accessedTime",
+      "allocationStatus",
+      "extension",
+      "fileName",
+      "filePath",
+      "sizeInBytes"
+    ],
+    "FileSystem": [
+      "clusterSize",
+      "fileSystemType"
+    ],
+    "FileSystemObject": [
+      "name"
+    ]
+  },
+  "relationships": [],
+  "analysis": "The MFT records are mapped to the CASE/UCO ontology through various classes and facets that describe their properties and relationships within the NTFS filesystem.",
+  "additional_details": {}
+}
+```

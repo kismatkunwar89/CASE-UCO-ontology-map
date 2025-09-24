@@ -20,6 +20,24 @@ SYNTHESIS_PROMPT = """You are a data synthesis expert. Your task is to read the 
 
 Based *only* on the information in the report, extract the data and structure it as a valid JSON object that conforms to the requested schema.
 
+- Reference output (structure is mandatory, empty containers allowed when there's no data):
+```
+{
+  "artifacts": ["Example Artifact"],
+  "classes": ["ExampleClass"],
+  "facets": ["ExampleFacet"],
+  "properties": {
+    "ExampleFacet": [
+      "exampleProperty",
+      "anotherProperty"
+    ]
+  },
+  "relationships": [],
+  "analysis": "Short 1-3 sentence summary tied directly to the report.",
+  "additional_details": {}
+}
+```
+
 - The 'properties', 'relationships', and 'additional_details' fields are required. If there is no information for them in the report, you MUST populate them with empty values (e.g., {}, [], or a default note) rather than omitting them.
 - Carefully extract all classes, facets, properties, and relationships mentioned.
 """

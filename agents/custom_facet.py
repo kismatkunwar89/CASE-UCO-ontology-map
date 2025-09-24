@@ -1,21 +1,67 @@
 import json
 import re
-from typing import Literal
+from typing import Any, Dict, Literal, Optional
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
-from langchain_core.output_parsers import JsonOutputParser
+from pydantic import BaseModel, Field
 
 # --- Custom Module Imports ---
 from state import State
 from config import MAX_CUSTOM_FACET_ATTEMPTS, CUSTOM_FACET_AGENT_PROMPT
+
+
+class CustomFacetResponse(BaseModel):
+    """Structured schema for the custom facet agent."""
+
+    customFacets: Dict[str, Any] = Field(default_factory=dict)
+    customState: Dict[str, Any] = Field(default_factory=dict)
+    ttlDefinitions: Optional[str] = None
+
+
+_CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_LINE_COMMENT_PATTERN = re.compile(r"(?<!https:)(?<!http:)//.*")
+
+
+def _model_dump(model: CustomFacetResponse) -> Dict[str, Any]:
+    """Compatible dump for both Pydantic v1 and v2."""
+
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _extract_json_payload(text: str) -> Dict[str, Any]:
+    """Attempt to coerce a JSON payload out of an LLM text response."""
+
+    match = _CODE_FENCE_PATTERN.search(text)
+    candidate = match.group(1) if match else text
+    candidate = candidate.strip()
+
+    # Trim leading / trailing content outside the outermost braces
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("No JSON object detected in custom facet response")
+    candidate = candidate[start : end + 1]
+
+    # Drop simple line comments that sometimes appear in model output
+    cleaned_lines = []
+    for line in candidate.splitlines():
+        cleaned_lines.append(_LINE_COMMENT_PATTERN.sub("", line))
+    cleaned = "\n".join(cleaned_lines)
+
+    return json.loads(cleaned)
 
 # =============================================================================
 # Agent Setup
 # =============================================================================
 
 custom_facet_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+custom_facet_structured_llm = custom_facet_llm.with_structured_output(
+    CustomFacetResponse, method="function_calling"
+)
 
 # =============================================================================
 # Agent Node Function
@@ -62,10 +108,16 @@ def custom_facet_node(state: State) -> dict:
     original_input = next((str(m.content) for m in messages if hasattr(m, 'type') and m.type == "human"), "")
 
     # --- FAST PATH OPTIMIZATION ---
-    additional_details = ontology_map.get("additional_details", {})
-    unmapped_elements = additional_details.get("unmappedElements")
+    additional_details = ontology_map.get("additional_details") or {}
+    reserved_fields = {"artifact_type", "description", "source"}
+    raw_unmapped = additional_details.get("unmappedElements", [])
+    unmapped_elements = [
+        element
+        for element in raw_unmapped
+        if not isinstance(element, str) or element not in reserved_fields
+    ]
 
-    if unmapped_elements is not None and not unmapped_elements:
+    if not unmapped_elements:
         print("[INFO] [Custom Facet] Pre-check PASSED: Agent 1 mapped all elements. Skipping LLM analysis.")
         return {
             "customFacets": {},
@@ -109,20 +161,45 @@ This is the analysis from the first agent. Your job is to find any gaps it left.
 """
 
     try:
-        # Define the parser and chain it with the LLM
-        parser = JsonOutputParser()
-        chain = custom_facet_llm | parser
+        print("[INFO] [Custom Facet] Sending prompt via structured output...")
 
-        print("[INFO] [Custom Facet] Sending prompt to LLM and parsing JSON output...")
+        data: Dict[str, Any]
+        try:
+            response_model = custom_facet_structured_llm.invoke([
+                {"role": "system", "content": CUSTOM_FACET_AGENT_PROMPT},
+                {"role": "user", "content": prompt},
+            ])
+            data = _model_dump(response_model)
+            print("[INFO] [Custom Facet] Structured output received.")
+        except Exception as structured_err:
+            print(
+                f"[WARNING] [Custom Facet] Structured output failed: {structured_err}. Falling back to raw parsing."
+            )
+            raw_response = custom_facet_llm.invoke(
+                [
+                    {"role": "system", "content": CUSTOM_FACET_AGENT_PROMPT},
+                    {"role": "user", "content": prompt},
+                ]
+            )
+            raw_text = getattr(raw_response, "content", raw_response)
+            try:
+                data = _extract_json_payload(raw_text)
+                print("[INFO] [Custom Facet] Successfully parsed fallback JSON response.")
+            except Exception as fallback_err:
+                error_msg = (
+                    f"Processing failed on attempt {current_attempts + 1}: "
+                    f"Unable to parse custom facet JSON ({fallback_err})."
+                )
+                print(f"[ERROR] [Custom Facet] {error_msg}")
+                new_errors = custom_errors + [error_msg]
+                return {
+                    "customFacetAttempts": current_attempts + 1,
+                    "customFacetErrors": new_errors,
+                    "messages": [
+                        HumanMessage(content=error_msg, name="custom_facet_agent")
+                    ],
+                }
 
-        # Invoke the chain. The parser will handle JSON extraction and parsing.
-        data = chain.invoke([
-            {"role": "system", "content": CUSTOM_FACET_AGENT_PROMPT},
-            {"role": "user", "content": prompt}
-        ])
-        
-        print("[INFO] [Custom Facet] Successfully parsed LLM response.")
-        
         custom_facets = data.get("customFacets", {})
         custom_state = data.get("customState", {})
         ttl_definitions = data.get("ttlDefinitions")
