@@ -7,11 +7,13 @@ Date: August 27, 2025
 """
 
 import sys
+import json
 import requests
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
 import concurrent.futures
 import threading
+from pathlib import Path
 
 try:
     import rdflib
@@ -65,6 +67,13 @@ class CaseUcoAnalyzer:
     def _load_single_ontology(self, name: str, url: str) -> tuple:
         """Load a single ontology and return (success, name, data, error)."""
         try:
+            local_path = Path(__file__).resolve().parent / "ttl" / f"{name}.ttl"
+            if local_path.exists():
+                print(f"  Loading {name} from local cache {local_path}...")
+                data = local_path.read_text(encoding="utf-8")
+                print(f"  ✅ {name} loaded successfully from cache")
+                return (True, name, data, None)
+
             print(f"  Loading {name}...")
             response = requests.get(url, timeout=15)
             response.raise_for_status()
@@ -521,6 +530,77 @@ class CaseUcoAnalyzer:
             },
             'has_facet_pattern': len(properties['facet']) > 0
         }
+
+# New helper to build structured property ownership model
+    def get_structured_property_profile(self, class_name: str) -> Dict[str, Any]:
+        """Return class metadata plus property ownership grouped for JSON output."""
+        summary = self.get_class_summary(class_name)
+        if 'error' in summary:
+            return summary
+
+        shacl_properties = self.get_shacl_property_shapes(class_name)
+
+        profile = {
+            'class_name': summary['name'],
+            'uri': summary['uri'],
+            'description': summary['description'],
+            'superclasses': summary['superclasses'],
+            'property_counts': summary['property_counts'],
+            'direct_properties': [],
+            'facet_properties': {},
+            'inherited_properties': [],
+            'semantic_properties': []
+        }
+
+        def _format_prop(name: str, info: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                'name': name,
+                'type': info.get('propertyType'),
+                'description': info.get('description'),
+                'min_count': info.get('minCount'),
+                'max_count': info.get('maxCount'),
+                'local_range': info.get('localRange'),
+                'global_range': info.get('globalRange')
+            }
+
+        class_is_facet = summary['name'].endswith('Facet')
+
+        for prop_name, info in shacl_properties.items():
+            descriptor = _format_prop(prop_name, info)
+            source = info.get('sourceClass', '') or ''
+            normalized_source = source
+
+            if normalized_source.endswith('FacetFacet'):
+                normalized_source = normalized_source[:-5]
+
+            if normalized_source == summary['name']:
+                profile['direct_properties'].append(descriptor)
+                continue
+
+            if normalized_source.endswith('Facet'):
+                # For facet classes, treat their own properties as direct
+                if class_is_facet and normalized_source == summary['name']:
+                    profile['direct_properties'].append(descriptor)
+                else:
+                    profile['facet_properties'].setdefault(normalized_source, []).append(descriptor)
+                continue
+
+            lowered = normalized_source.lower()
+            if lowered.startswith('inherited') or normalized_source in summary['superclasses']:
+                descriptor['source'] = normalized_source
+                profile['inherited_properties'].append(descriptor)
+                continue
+
+            if lowered.startswith('semantic') or normalized_source == 'Semantic':
+                profile['semantic_properties'].append(descriptor)
+                continue
+
+            # Fallback: treat as inherited from named class
+            if normalized_source:
+                descriptor['source'] = normalized_source
+            profile['inherited_properties'].append(descriptor)
+
+        return profile
 
     def get_class_details(self, class_name: str) -> Dict[str, Any]:
         """

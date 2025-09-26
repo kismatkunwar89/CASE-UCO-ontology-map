@@ -39,7 +39,7 @@ def route_supervisor(state: State) -> str:
     state["memory_context"] = memory_context
 
     # --- NEW GUARDRAIL: Check for critical errors from previous steps ---
-    if state.get("customFacetErrors") or state.get("graphGeneratorErrors") or "error" in state.get("ontologyMap", {}):
+    if state.get("graphGeneratorErrors") or "error" in state.get("ontologyMap", {}):
         print(
             "❌ [ROUTER] Critical error detected in a previous step. Terminating workflow.")
         return "__end__"

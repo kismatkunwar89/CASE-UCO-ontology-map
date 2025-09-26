@@ -74,6 +74,7 @@ class State(_BaseState, total=False):
     slotTypeMap: Dict[str, str]
     recordFingerprints: List[str]
     plannerVersion: str
+    sourcePropertyMap: Dict[str, Any]
 
     # Validation status fields
     l1_valid: bool
@@ -122,5 +123,6 @@ DEFAULT_STATE = {
     "slotTypeMap": {},
     "recordFingerprints": [],
     "plannerVersion": "v1",
+    "sourcePropertyMap": {},
     "uuids_to_invalidate": None,
 }

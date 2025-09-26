@@ -9,14 +9,26 @@ from typing import Dict, Any
 
 def _msg_text(msg):
     """Safely extract text content from BaseMessage objects."""
+    if isinstance(msg, (list, tuple)):
+        # Walk newest-to-oldest and return the first readable content, preferring human turns.
+        for item in reversed(msg):
+            if getattr(item, "type", None) == "human" and hasattr(item, "content"):
+                return item.content
+        # Fall back to any message with content/text.
+        for item in reversed(msg):
+            if hasattr(item, "content"):
+                return item.content
+            if hasattr(item, "text"):
+                return item.text
+        return ""
+
     if hasattr(msg, 'content'):
         return msg.content
-    elif hasattr(msg, 'text'):
+    if hasattr(msg, 'text'):
         return msg.text
-    elif isinstance(msg, str):
+    if isinstance(msg, str):
         return msg
-    else:
-        return str(msg)
+    return str(msg)
 
 
 def _get_input_artifacts(state):

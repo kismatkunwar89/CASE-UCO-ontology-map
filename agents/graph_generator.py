@@ -1,6 +1,6 @@
 import json
 import re
-from typing import List
+from typing import Any, List
 
 from langchain_core.messages import HumanMessage
 
@@ -14,6 +14,51 @@ from config import (
 # Removed generate_uuid import - using deterministic UUID plan instead
 from utils import _get_input_artifacts
 from agents.hallucination_checker import FeedbackProcessingAgent, DynamicCorrectionAgent
+
+
+def _normalise_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        if "@value" in value:
+            return value["@value"]
+        if set(value.keys()) == {"@id"}:
+            return value["@id"]
+        return json.dumps(value, sort_keys=True)
+    if isinstance(value, list):
+        return tuple(_normalise_value(v) for v in value)
+    return value
+
+
+def _build_allowed_values(source_map: dict) -> dict:
+    allowed = {}
+    for slot_uuid, payload in source_map.items():
+        value_set = set()
+        for container in (payload.get("properties", {}), payload.get("raw", {})):
+            for val in container.values():
+                norm = _normalise_value(val)
+                value_set.add(norm)
+                if isinstance(norm, (int, float, bool)):
+                    value_set.add(str(norm))
+        allowed[slot_uuid] = value_set
+    return allowed
+
+
+def _validate_graph_against_sources(json_obj: dict, allowed_map: dict):
+    for node in json_obj.get("@graph", []):
+        node_id = node.get("@id")
+        if not node_id:
+            continue
+        allowed_values = allowed_map.get(node_id)
+        if not allowed_values:
+            continue
+        for key, value in node.items():
+            if key in {"@id", "@type", "uco-core:hasFacet"}:
+                continue
+            values = value if isinstance(value, list) else [value]
+            for entry in values:
+                normalised = _normalise_value(entry)
+                if normalised not in allowed_values:
+                    raise ValueError(
+                        f"Value '{normalised}' for property '{key}' on node '{node_id}' is not supported by source data")
 
 def _merge_llm_output_into_skeleton(skeleton_graph, llm_graph):
     """
@@ -86,6 +131,9 @@ def graph_generator_node(state: State) -> dict:
 
     ontology_map = state.get("ontologyMap", {})
     custom_facets = state.get("customFacets", {})
+    source_properties = state.get("sourcePropertyMap", {})
+    if not source_properties:
+        print("[WARNING] [Graph Generator] No sourcePropertyMap provided; generator may lack real values.")
     custom_state = state.get("customState", {})
     ontology_markdown = state.get("ontologyMarkdown", "")
     validation_feedback = state.get("validation_feedback", "")
@@ -101,30 +149,53 @@ def graph_generator_node(state: State) -> dict:
     skeleton_graph = {"@graph": []}
     nodes_by_id = {}
     if uuid_plan and slot_type_map:
-        # First, create all nodes
+        included_records = []
         for record_plan in uuid_plan:
+            primary_slug = None
+            for slot_slug in record_plan.keys():
+                lower_slug = slot_slug.lower()
+                if "facet" in lower_slug or "relationship" in lower_slug:
+                    continue
+                primary_slug = slot_slug
+                break
+            if primary_slug is None and record_plan:
+                primary_slug = next(iter(record_plan))
+            included_slots = []
             for slot_slug, slot_uuid in record_plan.items():
+                slot_type = slot_type_map.get(slot_uuid, "uco-core:UcoObject")
+                include_slot = True
+                if slot_slug != primary_slug:
+                    lower_slug = slot_slug.lower()
+                    payload = source_properties.get(slot_uuid, {}) if isinstance(source_properties, dict) else {}
+                    slot_type_lower = slot_type.lower() if isinstance(slot_type, str) else ""
+                    if "relationship" in lower_slug or slot_type_lower.endswith("relationship"):
+                        include_slot = bool(payload.get("properties") or payload.get("raw"))
+                    elif "facet" in lower_slug:
+                        include_slot = bool(payload.get("properties") or payload.get("raw"))
+                if not include_slot:
+                    continue
                 node = {
                     "@id": slot_uuid,
-                    "@type": slot_type_map.get(slot_uuid, "uco-core:UcoObject")
+                    "@type": slot_type
                 }
                 skeleton_graph["@graph"].append(node)
                 nodes_by_id[slot_uuid] = node
+                included_slots.append((slot_slug, slot_uuid))
+            included_records.append((primary_slug, included_slots))
 
-        # Second, link facets
-        for record_plan in uuid_plan:
-            parent_node_id = None
-            facet_ids = []
-            for slot_slug, slot_uuid in record_plan.items():
-                if "facet" not in slot_slug.lower():
-                    parent_node_id = slot_uuid
-                else:
-                    facet_ids.append({"@id": slot_uuid})
-            
-            if parent_node_id and facet_ids:
-                parent_node = nodes_by_id.get(parent_node_id)
+        for primary_slug, slots in included_records:
+            primary_uuid = None
+            facet_refs = []
+            for slot_slug, slot_uuid in slots:
+                lower_slug = slot_slug.lower()
+                if slot_slug == primary_slug:
+                    primary_uuid = slot_uuid
+                elif "facet" in lower_slug:
+                    facet_refs.append({"@id": slot_uuid})
+            if primary_uuid and facet_refs:
+                parent_node = nodes_by_id.get(primary_uuid)
                 if parent_node:
-                    parent_node["uco-core:hasFacet"] = facet_ids
+                    parent_node["uco-core:hasFacet"] = facet_refs
 
     error_feedback = ""
     if graph_errors:
@@ -144,8 +215,11 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
 ## STANDARD ONTOLOGY KEYS (from Agent 1):
 {json.dumps(ontology_map, indent=2)}
 
-## CUSTOM FACETS (from Agent 2):
-{json.dumps(custom_facets, indent=2)}
+   ## CUSTOM FACETS (from Agent 2):
+   {json.dumps(custom_facets, indent=2)}
+
+   ## SOURCE PROPERTY MAP (directly from evidence fields):
+   {json.dumps(source_properties, indent=2)}
 
 ## VALIDATION FEEDBACK FOR CORRECTION:
 {validation_feedback}
@@ -156,7 +230,7 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
 
 ## INSTRUCTIONS:
 1.  Review the source data (in the ontology and custom facet maps).
-2.  For each entity in the GRAPH SKELETON, add the relevant properties and values.
+   2.  For each entity in the GRAPH SKELETON, add the relevant properties and values, pulling data from SOURCE PROPERTY MAP when present.
 3.  Return the completed JSON-LD graph.
 
 ## CRITICAL REMINDER ON PROPERTY PLACEMENT:
@@ -164,7 +238,10 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
 - A property like `uco-observable:filePath` or `uco-observable:createdTime` MUST NOT appear on a `uco-observable:File` node.
 - These properties MUST be placed on the corresponding facet node (e.g., `uco-observable:FileFacet`).
 - The parent `File` node should ONLY contain the `uco-core:hasFacet` property pointing to its facets.
-- VIOLATING THIS RULE WILL CAUSE IMMEDIATE SYSTEM FAILURE. Double-check every property's location before outputting the graph.
+   - VIOLATING THIS RULE WILL CAUSE IMMEDIATE SYSTEM FAILURE. Double-check every property's location before outputting the graph.
+
+   ## CRITICAL DATA INTEGRITY RULE:
+   - You MUST NOT invent property values. Only use literals provided in SOURCE PROPERTY MAP or CUSTOM FACETS. If a value is absent, omit the property.
 """
 
     try:
@@ -243,6 +320,10 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
                 "dfc-ext": "https://www.w3.org/dfc-ext/"
             }
 
+        if source_properties:
+            allowed_map = _build_allowed_values(source_properties)
+            _validate_graph_against_sources(json_obj, allowed_map)
+
         print(
             f"[SUCCESS] [Graph Generator] Successfully generated JSON-LD with {len(json_obj.get('@graph', []))} entities")
 
@@ -259,3 +340,4 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
             "graphGeneratorAttempts": current_attempts + 1,
             "graphGeneratorErrors": graph_errors + [error_msg],
         }
+

@@ -16,35 +16,51 @@ from utils import _get_input_artifacts
 # to return a JSON object that conforms to that schema.
 structured_llm = llm.with_structured_output(OntologyAnalysis)
 
-SYNTHESIS_PROMPT = """You are a data synthesis expert. Your task is to read the provided markdown report, which contains a detailed analysis of forensic artifacts mapped to the CASE/UCO ontology.
 
-Based *only* on the information in the report, extract the data and structure it as a valid JSON object that conforms to the requested schema.
+SYNTHESIS_PROMPT = """"Ontology Synthesizer — Markdown Pass-Through
+================================================
+You receive an ontology research markdown report. Your job is to extract the final JSON mapping exactly as described below—without inventing, dropping, or rearranging data.
 
-- Reference output (structure is mandatory, empty containers allowed when there's no data):
-```
+Target schema
+-------------
+```json
 {
-  "artifacts": ["Example Artifact"],
-  "classes": ["ExampleClass"],
-  "facets": ["ExampleFacet"],
-  "properties": {
-    "ExampleFacet": [
-      "exampleProperty",
-      "anotherProperty"
-    ]
-  },
-  "relationships": [],
-  "analysis": "Short 1-3 sentence summary tied directly to the report.",
+  "artifacts": ["string"],
+  "classes": ["string"],
+  "facets": ["string"],
+  "properties": {"NodeName": ["propertyName"]},
+  "relationships": [{"type": "hasFacet", "source": "Class", "target": "Facet"}],
+  "analysis": "string",
   "additional_details": {}
 }
 ```
+All keys are required. Use empty lists/objects/strings only when the report truly has no data for that section.
 
-- The 'properties', 'relationships', and 'additional_details' fields are required. If there is no information for them in the report, you MUST populate them with empty values (e.g., {}, [], or a default note) rather than omitting them.
-- Carefully extract all classes, facets, properties, and relationships mentioned.
+Workflow
+--------
+1. Locate the **last fenced JSON block** in the markdown. This block already represents the analyst’s intended output.
+2. Parse it. If any keys are missing, add them with empty defaults (list/object/string). Do not delete existing keys.
+3. Validate:
+   - `artifacts`, `classes`, `facets` are arrays of strings.
+   - `properties` is a dictionary where each value is an array of strings. Preserve every property name exactly as given. Never drop a property unless the source JSON is malformed.
+   - `relationships` is an array of objects. Keep every relationship; if the array is missing, create it from the report’s `#### Relationship Patterns` section.
+   - `analysis` is a short domain-neutral string (reuse the value from the JSON or the `Intelligent Ontology Modeling Analysis` section).
+   - `additional_details` is an object (use `{}` when absent).
+4. If the fenced JSON omitted `relationships` or left them empty but the report listed `Class -> hasFacet -> Facet` bullets, populate the array with those entries. Do not invent other edges.
+5. Output the normalized JSON **exactly once**. Do not wrap it in markdown.
+
+Hard Rules
+----------
+- Do not invent new classes, facets, properties, or relationships.
+- Do not drop items that already exist in the fenced JSON or tables.
+- Preserve original casing of ontology terms.
+- Keep the output domain agnostic—no case-specific narratives or raw evidence values.
 """
 
 # =============================================================================
 # Agent Node Function
 # =============================================================================
+
 
 def ontology_synthesis_node(state: State) -> dict:
     """
@@ -83,13 +99,16 @@ def ontology_synthesis_node(state: State) -> dict:
         ])
 
         if not isinstance(synthesis_result, OntologyAnalysis):
-             raise TypeError(f"Expected OntologyAnalysis, but got {type(synthesis_result)}")
+            raise TypeError(
+                f"Expected OntologyAnalysis, but got {type(synthesis_result)}")
 
-        print("[SUCCESS] [Ontology Synthesizer] Successfully synthesized structured ontology map.")
+        print(
+            "[SUCCESS] [Ontology Synthesizer] Successfully synthesized structured ontology map.")
 
         # The output of the structured LLM is already a Pydantic model,
         # so we can convert it to a dict for the state.
-        return {"ontologyMap": synthesis_result.dict()} # Use .dict() for Pydantic v1
+        # Use .dict() for Pydantic v1
+        return {"ontologyMap": synthesis_result.dict()}
 
     except Exception as e:
         error_msg = f"Failed to synthesize ontology map: {e}"

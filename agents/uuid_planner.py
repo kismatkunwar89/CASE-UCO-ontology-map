@@ -1,80 +1,236 @@
+from collections import OrderedDict
+import re
+from typing import Dict, Iterable, List, Tuple
+
 from state import State
 from tools import _generate_record_fingerprint, _uuid5, NS_RECORD, NS_SLOT
 
+
+PROPERTY_ALIAS_MAP = {
+    "entrynumber": ["mftFileID", "entryID"],
+    "sequencenumber": ["sequenceNumber", "entrySequence"],
+    "parententrynumber": ["mftParentID"],
+    "fullpath": ["filePath"],
+    "inuse": ["allocationStatus", "isAllocated"],
+    "si_created": ["mftFileNameCreatedTime", "createdTime"],
+    "si_modified": ["mftFileNameModifiedTime", "modifiedTime"],
+    "si_accessed": ["mftFileNameAccessedTime", "accessedTime"],
+    "fn_created": ["createdTime"],
+    "fn_modified": ["modifiedTime"],
+    "size": ["sizeInBytes"],
+    "filename": ["fileName"],
+    "filesystem": ["fileSystemType"],
+}
+
+
+def _slugify(name: str) -> str:
+    return name.replace(" ", "_").replace("-", "_").lower()
+
+
+def _extract_records(raw_input: object) -> List[Dict]:
+    """Normalise the raw input into a list of per-record dictionaries."""
+    if isinstance(raw_input, list):
+        return [rec for rec in raw_input if isinstance(rec, dict)]
+
+    if isinstance(raw_input, dict):
+        records = raw_input.get("records")
+        if isinstance(records, list):
+            # fan-out: merge shared metadata with each record without overwriting per-record fields
+            shared = {k: v for k, v in raw_input.items() if k != "records"}
+            normalised = []
+            for rec in records:
+                if isinstance(rec, dict):
+                    merged = {**shared, **rec}
+                    normalised.append(merged)
+            return normalised
+        return [raw_input]
+
+    return []
+
+
+def _choose_primary_class(classes: Iterable[str], facets: Iterable[str]) -> str:
+    facet_set = {f.lower() for f in facets}
+    for cls in classes:
+        if cls.lower() not in facet_set and not cls.lower().endswith("facet"):
+            return cls
+    return "ObservableObject"
+
+
+def _iri_for(name: str) -> str:
+    # Default to CASE/UCO observable namespace when no explicit mapping is available.
+    return f"uco-observable:{name}"
+
+
+def _normalize_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _tokenize(name: str) -> List[str]:
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
+    spaced = spaced.replace("_", " ").replace("-", " ")
+    return [tok for tok in spaced.lower().split() if tok]
+
+
+def _prepare_property_index(ontology_properties: Dict[str, List[str]]) -> Dict[str, List[Tuple[str, set]]]:
+    index: Dict[str, List[Tuple[str, set]]] = {}
+    for owner, props in ontology_properties.items():
+        owner_slug = _slugify(owner)
+        entries: List[Tuple[str, set]] = []
+        for prop in props:
+            entries.append((prop, set(_tokenize(prop))))
+        if entries:
+            index[owner_slug] = entries
+    return index
+
+
+def _match_property(raw_key: str, owner_property_index: Dict[str, List[Tuple[str, set]]]) -> Tuple[str | None, str | None]:
+    alias_candidates = PROPERTY_ALIAS_MAP.get(raw_key)
+    if alias_candidates:
+        for owner_slug, entries in owner_property_index.items():
+            for prop, _ in entries:
+                if prop in alias_candidates:
+                    return owner_slug, prop
+                if prop.lower() in [alias.lower() for alias in alias_candidates]:
+                    return owner_slug, prop
+
+    raw_tokens = set(_tokenize(raw_key))
+    best_score = 0
+    best_owner = None
+    best_prop = None
+    for owner_slug, entries in owner_property_index.items():
+        for prop, tokens in entries:
+            score = len(raw_tokens & tokens)
+            if score > best_score:
+                best_score = score
+                best_owner = owner_slug
+                best_prop = prop
+    if best_score > 0:
+        return best_owner, best_prop
+    return None, None
+
+
+def _qualify_property(prop_name: str) -> str:
+    if ":" in prop_name:
+        return prop_name
+    return f"uco-observable:{prop_name}"
+
+
+def _build_source_property_map(records: List[Dict], plan_rows: List[OrderedDict[str, str]], slot_type_map: Dict[str, str], ontology_map: Dict[str, Dict]) -> Dict[str, Dict[str, Dict]]:
+    source_map: Dict[str, Dict[str, Dict]] = {}
+    property_index = _prepare_property_index(ontology_map.get("properties", {}))
+
+    for record, plan_row in zip(records, plan_rows):
+        if not plan_row:
+            continue
+        slug_to_uuid = plan_row
+        primary_slug = next(iter(plan_row))
+
+        # Ensure every slot has an entry even if no properties map to it
+        for slot_slug, slot_uuid in slug_to_uuid.items():
+            source_map.setdefault(slot_uuid, {
+                "type": slot_type_map.get(slot_uuid, ""),
+                "properties": {},
+                "raw": {}
+            })
+
+        for raw_key, value in record.items():
+            normalized_key = _normalize_key(raw_key)
+            owner_slug, prop_name = _match_property(normalized_key, property_index)
+
+            target_slug = owner_slug if owner_slug in slug_to_uuid else primary_slug
+            slot_uuid = slug_to_uuid[target_slug]
+            slot_entry = source_map[slot_uuid]
+            slot_entry["raw"][raw_key] = value
+
+            if prop_name:
+                qualified = _qualify_property(prop_name)
+                slot_entry["properties"][qualified] = value
+
+    return source_map
+
+
 def uuid_planner_node(state: State) -> dict:
-    """
-    Generates a deterministic UUID plan for all records. 
-    This version is incremental, using content-based fingerprints to re-plan only
-    new or changed records.
-    """
+    """Build a deterministic UUID plan per record using ontology hints."""
     print("[INFO] [UUID Planner] Running incremental planner...")
 
-    # --- Get current and previous state ---
-    raw_input = state.get("rawInputJSON", [])
-    records = raw_input if isinstance(raw_input, list) else ([raw_input] if raw_input else [])
-    
+    raw_input = state.get("rawInputJSON")
+    records = _extract_records(raw_input)
+
     previous_plan = state.get("uuidPlan") or []
     previous_fingerprints = state.get("recordFingerprints") or []
     previous_map = state.get("slotTypeMap", {})
-    
+
     if not records:
         print("[WARNING] [UUID Planner] No records found in rawInputJSON to plan for.")
-        return {"uuidPlan": [], "slotTypeMap": {}, "recordFingerprints": []}
-
-    # --- Fingerprint Calculation ---
-    current_fingerprints = [_generate_record_fingerprint(rec) for rec in records]
-    
-    # --- Incremental Planning ---
-    new_plan = []
-    new_map = {}
-    old_plan_map = {fp: plan for fp, plan in zip(previous_fingerprints, previous_plan)}
+        return {"uuidPlan": [], "slotTypeMap": {}, "recordFingerprints": [], "sourcePropertyMap": {}}
 
     ontology_map = state.get("ontologyMap", {})
-    all_class_slugs = [c.lower() for c in ontology_map.get("classes", [])]
-    all_facet_slugs = [f.lower() for f in ontology_map.get("facets", [])]
-    prop_to_owner = {prop.lower(): owner.lower() for owner, props in ontology_map.get("properties", {}).items() for prop in props}
+    ontology_classes = list(ontology_map.get("classes", []))
+    ontology_facets = list(ontology_map.get("facets", []))
+    if not ontology_facets:
+        for owner in ontology_map.get("properties", {}).keys():
+            if owner not in ontology_facets and owner.lower().endswith("facet"):
+                ontology_facets.append(owner)
+    relationships = ontology_map.get("relationships", []) or []
 
-    for i, fingerprint in enumerate(current_fingerprints):
+    primary_class = _choose_primary_class(ontology_classes, ontology_facets)
+    if primary_class == "ObservableObject":
+        if ontology_classes:
+            primary_class = ontology_classes[0]
+        else:
+            for owner in ontology_map.get("properties", {}).keys():
+                if not owner.lower().endswith("facet"):
+                    primary_class = owner
+                    break
+    facet_slugs = [_slugify(facet) for facet in ontology_facets]
+
+    current_fingerprints = [_generate_record_fingerprint(rec) for rec in records]
+    old_plan_map = {fp: plan for fp, plan in zip(previous_fingerprints, previous_plan)}
+
+    new_plan: List[OrderedDict[str, str]] = []
+    new_map: Dict[str, str] = {}
+
+    for record, fingerprint in zip(records, current_fingerprints):
         if fingerprint in old_plan_map:
-            # UNCHANGED: Reuse the old plan and map entries
-            plan_row = old_plan_map[fingerprint]
+            plan_row = OrderedDict(old_plan_map[fingerprint])
             new_plan.append(plan_row)
             for slot_uuid in plan_row.values():
                 if slot_uuid in previous_map:
                     new_map[slot_uuid] = previous_map[slot_uuid]
-        else:
-            # NEW OR CHANGED: Generate a new plan row
-            record = records[i]
-            record_uuid = _uuid5(NS_RECORD, fingerprint)
-            plan_row = {}
-            required_slots = set()
+            continue
 
-            for cls in all_class_slugs:
-                if any(cls in key.lower() for key in record.keys()):
-                    required_slots.add(cls)
-            if not required_slots:
-                required_slots.add('observableobject')
+        record_uuid = _uuid5(NS_RECORD, fingerprint)
+        plan_row: "OrderedDict[str, str]" = OrderedDict()
 
-            for key in record.keys():
-                owner = prop_to_owner.get(key.lower())
-                if owner and owner in all_facet_slugs:
-                    required_slots.add(owner)
+        # Always create a primary object node so downstream generators have a root.
+        primary_slug = _slugify(primary_class)
+        primary_uuid = _uuid5(NS_SLOT, f"{record_uuid}:{primary_slug}")
+        plan_row[primary_slug] = primary_uuid
+        new_map[primary_uuid] = _iri_for(primary_class)
 
-            for slot_slug in required_slots:
-                slot_uuid = _uuid5(NS_SLOT, f"{record_uuid}:{slot_slug}")
-                plan_row[slot_slug] = slot_uuid
-                original_slug = next((s for s in ontology_map.get("classes", []) + ontology_map.get("facets", []) if s.lower() == slot_slug), slot_slug)
-                new_map[slot_uuid] = f"uco-observable:{original_slug}"
-            
-            if ontology_map.get("relationships"):
-                for rel_idx, rel in enumerate(ontology_map["relationships"]):
-                    kind = rel.get("type", "related_to").lower()
-                    rel_slug = f"relationship_{kind}_{rel_idx}"
-                    rel_uuid = _uuid5(NS_SLOT, f"{record_uuid}:{rel_slug}")
-                    plan_row[rel_slug] = rel_uuid
-                    new_map[rel_uuid] = "uco-observable:ObservableRelationship"
-            
-            new_plan.append(plan_row)
+        # Add one slot per facet advertised by the ontology map.
+        for facet_name, facet_slug in zip(ontology_facets, facet_slugs):
+            facet_uuid = _uuid5(NS_SLOT, f"{record_uuid}:{facet_slug}")
+            plan_row[facet_slug] = facet_uuid
+            new_map[facet_uuid] = _iri_for(facet_name)
+
+        # Relationships (if any) get their own deterministic IDs per record.
+        for rel_idx, rel in enumerate(relationships):
+            kind = rel.get("type") or "relatedTo"
+            rel_slug = _slugify(f"relationship_{kind}_{rel_idx}")
+            rel_uuid = _uuid5(NS_SLOT, f"{record_uuid}:{rel_slug}")
+            plan_row[rel_slug] = rel_uuid
+            new_map[rel_uuid] = _iri_for("ObservableRelationship")
+
+        new_plan.append(plan_row)
+
+    # Ensure slot_type_map contains reused entries as well
+    for plan_row in new_plan:
+        for slot_uuid in plan_row.values():
+            if slot_uuid not in new_map and slot_uuid in previous_map:
+                new_map[slot_uuid] = previous_map[slot_uuid]
+
+    source_property_map = _build_source_property_map(records, new_plan, new_map, ontology_map)
 
     print(f"[SUCCESS] [UUID Planner] Generated plan for {len(new_plan)} records.")
 
@@ -82,6 +238,7 @@ def uuid_planner_node(state: State) -> dict:
         "recordFingerprints": current_fingerprints,
         "uuidPlan": new_plan,
         "slotTypeMap": new_map,
+        "sourcePropertyMap": source_property_map,
     }
 
 def invalidate_uuid_plan_node(state: State) -> dict:

@@ -83,14 +83,14 @@ class AnalyzeCaseUcoInput(BaseModel):
     """Input schema for the analyze_case_uco_class tool."""
     class_name: str = Field(...,
                             description="CASE/UCO class (e.g., 'WindowsPrefetch')")
-    output_format: Literal["markdown", "summary", "properties"] = "markdown"
+    output_format: Literal["markdown", "summary", "properties", "json"] = "markdown"
 
 
 @tool("analyze_case_uco_class", args_schema=AnalyzeCaseUcoInput)
 def analyze_case_uco_class(class_name: str, output_format: str = "markdown") -> str:
     """
     Analyze a CASE/UCO ontology class and return detailed information.
-    Supported formats: 'markdown', 'summary', 'properties'.
+    Supported formats: 'markdown', 'summary', 'properties', 'json'.
     """
     try:
         fmt = (output_format or "markdown").strip().lower()
@@ -173,8 +173,13 @@ def analyze_case_uco_class(class_name: str, output_format: str = "markdown") -> 
                         lines.append(
                             f"     Description: {desc[:80] + '...' if len(desc) > 80 else desc}")
             return "\n".join(lines)
+        elif fmt == "json":
+            structured = analyzer.get_structured_property_profile(cls)
+            if isinstance(structured, dict) and structured.get('error'):
+                return f"Error: {structured['error']}"
+            return json.dumps(structured, indent=2, sort_keys=False)
         else:
-            return "Invalid output_format: 'markdown', 'summary', or 'properties' are supported."
+            return "Invalid output_format: 'markdown', 'summary', 'properties', or 'json' are supported."
     except Exception as e:
         return f"Error analyzing CASE/UCO class '{class_name}': {e}"
 
