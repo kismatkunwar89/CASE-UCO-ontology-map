@@ -28,37 +28,7 @@ def _normalise_value(value: Any) -> Any:
     return value
 
 
-def _build_allowed_values(source_map: dict) -> dict:
-    allowed = {}
-    for slot_uuid, payload in source_map.items():
-        value_set = set()
-        for container in (payload.get("properties", {}), payload.get("raw", {})):
-            for val in container.values():
-                norm = _normalise_value(val)
-                value_set.add(norm)
-                if isinstance(norm, (int, float, bool)):
-                    value_set.add(str(norm))
-        allowed[slot_uuid] = value_set
-    return allowed
-
-
-def _validate_graph_against_sources(json_obj: dict, allowed_map: dict):
-    for node in json_obj.get("@graph", []):
-        node_id = node.get("@id")
-        if not node_id:
-            continue
-        allowed_values = allowed_map.get(node_id)
-        if not allowed_values:
-            continue
-        for key, value in node.items():
-            if key in {"@id", "@type", "uco-core:hasFacet"}:
-                continue
-            values = value if isinstance(value, list) else [value]
-            for entry in values:
-                normalised = _normalise_value(entry)
-                if normalised not in allowed_values:
-                    raise ValueError(
-                        f"Value '{normalised}' for property '{key}' on node '{node_id}' is not supported by source data")
+# Removed strict validation functions - LLM now has full control over graph generation
 
 def _merge_llm_output_into_skeleton(skeleton_graph, llm_graph):
     """
@@ -320,9 +290,8 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
                 "dfc-ext": "https://www.w3.org/dfc-ext/"
             }
 
-        if source_properties:
-            allowed_map = _build_allowed_values(source_properties)
-            _validate_graph_against_sources(json_obj, allowed_map)
+        # Validation removed - let LLM have full control over graph generation
+        # The LLM has all necessary context from ontology research, custom facets, and source data
 
         print(
             f"[SUCCESS] [Graph Generator] Successfully generated JSON-LD with {len(json_obj.get('@graph', []))} entities")

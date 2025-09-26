@@ -82,7 +82,9 @@ def run_pipeline() -> None:
 
     print("[stage] graph_generator_node")
     graph_output = graph_generator_node(state)
-    print(json.dumps(graph_output, indent=2))
+    # Print only the JSON-LD graph, not the messages
+    print("Generated JSON-LD Graph:")
+    print(json.dumps(graph_output.get("jsonldGraph"), indent=2))
 
 
 if __name__ == "__main__":
