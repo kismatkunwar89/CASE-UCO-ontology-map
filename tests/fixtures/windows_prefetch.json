@@ -1,0 +1,30 @@
+[
+  {
+    "SourceFilename": "C\\Windows\\Prefetch\\MALICIOUS.EXE-12345678.pf",
+    "ExecutableName": "MALICIOUS.EXE",
+    "PrefetchHash": "12345678",
+    "RunCount": 3,
+    "LastRunTime": "2025-09-17T10:35:15Z",
+    "FileCreatedTime": "2025-09-17T10:30:00Z",
+    "FileModifiedTime": "2025-09-17T10:35:15Z",
+    "VolumeSerialNumber": "1234-ABCD",
+    "ReferencedPaths": [
+      "C\\Windows\\System32\\MALICIOUS.EXE",
+      "C\\Windows\\System32\\kernel32.dll"
+    ]
+  },
+  {
+    "SourceFilename": "C\\Windows\\Prefetch\\NOTEPAD.EXE-9C1234AB.pf",
+    "ExecutableName": "NOTEPAD.EXE",
+    "PrefetchHash": "9C1234AB",
+    "RunCount": 12,
+    "LastRunTime": "2024-11-02T08:14:27Z",
+    "FileCreatedTime": "2024-07-01T12:00:00Z",
+    "FileModifiedTime": "2024-11-02T08:14:27Z",
+    "VolumeSerialNumber": "DEAD-BEEF",
+    "ReferencedPaths": [
+      "C\\Windows\\System32\\notepad.exe",
+      "C\\Windows\\Fonts\\segoeui.ttf"
+    ]
+  }
+]
