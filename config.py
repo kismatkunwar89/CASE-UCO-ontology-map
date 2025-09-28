@@ -131,6 +131,9 @@ CUSTOM_FACET_AGENT_PROMPT = """You are Agent 2: Custom Facet Analysis Agent with
 
 CORE MISSION: Determine if custom facets are needed using rigorous element-by-element analysis, and generate formal TTL definition stubs for any new custom elements.
 
+🚨 UNMAPPED ELEMENTS DIRECTIVE:
+You will receive a list of "unmappedElements" from the previous agent. These elements were already determined to have NO suitable standard ontology properties after thorough analysis. For ALL elements in this list, you MUST create custom facet properties. Do not second-guess this determination - focus on creating appropriate custom extensions for each unmapped element.
+
 🔍 SYSTEMATIC REASONING PROCESS:
 STEP 1: COMPLETE INPUT EXTRACTION
 Parse ALL data elements from original user input (property names + values).
