@@ -67,6 +67,48 @@ def _to_camel_case(name: str) -> str:
     return first.lower() + "".join(token.capitalize() for token in rest)
 
 
+def _generate_extension_facet_name(artifact_type: str) -> str:
+    """
+    Generate a contextual facet name based on artifact_type.
+
+    Transforms artifact_type into PascalCase and appends 'ExtensionFacet' suffix.
+    This function is completely domain-agnostic and works with any artifact type.
+
+    Examples:
+        "MFT Record" -> "MftRecordExtensionFacet"
+        "Windows Prefetch" -> "WindowsPrefetchExtensionFacet"
+        "Email Message" -> "EmailMessageExtensionFacet"
+        "Network Log" -> "NetworkLogExtensionFacet"
+
+    Args:
+        artifact_type: The artifact type string from input data
+
+    Returns:
+        Dynamic facet name following the pattern {Type}ExtensionFacet
+    """
+    if not artifact_type or not isinstance(artifact_type, str):
+        return "UnknownArtifactExtensionFacet"
+
+    # Clean and normalize the artifact type
+    cleaned = artifact_type.strip()
+    if not cleaned:
+        return "UnknownArtifactExtensionFacet"
+
+    # Split into tokens, handling various separators
+    tokens = re.split(r"[^A-Za-z0-9]+", cleaned)
+    # Filter out empty tokens
+    tokens = [token for token in tokens if token]
+
+    if not tokens:
+        return "UnknownArtifactExtensionFacet"
+
+    # Convert to PascalCase (capitalize all tokens including first)
+    pascal_case = "".join(token.capitalize() for token in tokens)
+
+    # Append the extension facet suffix
+    return f"{pascal_case}ExtensionFacet"
+
+
 def _infer_xsd_datatype(value: Any) -> str:
     if isinstance(value, bool):
         return "xsd:boolean"
@@ -91,8 +133,15 @@ def _auto_generate_custom_facets(
     if isinstance(raw_input_payload, dict):
         record = raw_input_payload.get("record") if isinstance(raw_input_payload.get("record"), dict) else {}
 
+    # Extract artifact_type for dynamic facet naming
+    artifact_type = None
+    if isinstance(raw_input_payload, dict):
+        artifact_type = raw_input_payload.get("artifact_type")
+
+    # Generate dynamic facet name based on artifact_type
+    base_name = _generate_extension_facet_name(artifact_type)
+
     existing_facets = set(ontology_map.get("facets", []) or [])
-    base_name = "AutoUnmappedFacet"
     facet_name = base_name
     suffix = 2
     while facet_name in existing_facets:
@@ -132,7 +181,7 @@ def _auto_generate_custom_facets(
         "facetDefinitions": {
             facet_name: {
                 "namespace": "dfc-ext",
-                "reasoning": "Automatically generated facet covering unmapped evidence fields.",
+                "reasoning": f"Automatically generated extension facet for {artifact_type or 'unknown artifact type'} covering unmapped evidence fields.",
                 "properties": properties
             }
         },
@@ -151,12 +200,12 @@ def _auto_generate_custom_facets(
         "totalCustomFacets": 1,
         "unmappedElementCount": len(unmapped_details),
         "extensionNamespace": "dfc-ext",
-        "reasoning": "Deterministically generated custom facet to preserve unmapped fields."
+        "reasoning": f"Deterministically generated {facet_name} to preserve unmapped fields for {artifact_type or 'unknown artifact type'}."
     }
 
-    ttl_lines = [_TTL_HEADER, "", "# Auto-generated facet for unmapped evidence fields"]
+    ttl_lines = [_TTL_HEADER, "", f"# Auto-generated extension facet for {artifact_type or 'unknown artifact type'}"]
     ttl_lines.append(
-        f"dfc-ext:{facet_name}\n  a owl:Class ;\n  rdfs:subClassOf uco-core:Facet ;\n  rdfs:label \"{facet_name}\" ;\n  rdfs:comment \"Automatically generated facet capturing unmapped evidence fields.\" ."
+        f"dfc-ext:{facet_name}\n  a owl:Class ;\n  rdfs:subClassOf uco-core:Facet ;\n  rdfs:label \"{facet_name}\" ;\n  rdfs:comment \"Extension facet for {artifact_type or 'unknown artifact type'} capturing unmapped evidence fields.\" ."
     )
     for prop_name, meta in properties.items():
         local = prop_name.split(":", 1)[1]
