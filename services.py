@@ -6,6 +6,8 @@ Refactored from main.py to separate concerns and enable API integration.
 import os
 import uuid
 import json
+import csv
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Generator, Dict, Any
@@ -24,7 +26,7 @@ def _normalize_input(input_artifacts: Any) -> Dict[str, Any]:
       {
         'as_text': str,     # what we feed the LLM as user message
         'raw_json': Any,    # original object or None
-        'format': 'json' | 'text'
+        'format': 'json' | 'text' | 'csv'
       }
     """
     if isinstance(input_artifacts, (dict, list)):
@@ -33,6 +35,28 @@ def _normalize_input(input_artifacts: Any) -> Dict[str, Any]:
             "raw_json": input_artifacts,
             "format": "json",
         }
+
+    # Check if input is CSV format (string with commas and newlines)
+    if isinstance(input_artifacts, str):
+        # Try to detect CSV format by checking for common CSV patterns
+        lines = input_artifacts.strip().split('\n')
+        if len(lines) > 1 and ',' in lines[0]:
+            try:
+                # Attempt to parse as CSV with strict error handling
+                csv_reader = csv.DictReader(io.StringIO(input_artifacts), strict=True)
+                parsed_rows = list(csv_reader)
+
+                if parsed_rows:
+                    # Successfully parsed as CSV
+                    return {
+                        "as_text": json.dumps(parsed_rows, indent=2),
+                        "raw_json": parsed_rows,
+                        "format": "csv",
+                    }
+            except (csv.Error, Exception) as e:
+                # If CSV parsing fails, raise a user-friendly error
+                raise ValueError(f"Invalid CSV format: {str(e)}. Please ensure your CSV file has proper headers and formatting.")
+
     return {
         "as_text": str(input_artifacts),
         "raw_json": None,
@@ -57,7 +81,8 @@ def ensure_session_directory() -> Path:
 
 def execute_forensic_analysis_session_stream(
     session_id: str,
-    input_artifacts: Any
+    input_artifacts: Any,
+    metadata: Dict[str, Any] = None
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Executes a complete forensic analysis workflow with isolated, persistent state.
@@ -66,6 +91,7 @@ def execute_forensic_analysis_session_stream(
     Args:
         session_id: Unique identifier for this analysis session
         input_artifacts: The forensic artifact description to analyze
+        metadata: Optional metadata dict with artifact_type, description, source
 
     Yields:
         Dict containing event data with type, step information, and session details
@@ -89,15 +115,51 @@ def execute_forensic_analysis_session_stream(
             # Normalize input and prepare for agent execution
             norm = _normalize_input(input_artifacts)
 
+            # Prepend metadata if provided
+            user_message = norm["as_text"]
+            raw_json_data = norm["raw_json"]
+
+            if metadata:
+                # CRITICAL FIX: Wrap CSV data in the same structure as smoke test
+                # This ensures ALL agents (ontology researcher, custom_facet) see the correct structure
+                if norm["format"] == "csv" and isinstance(raw_json_data, list) and len(raw_json_data) > 0:
+                    # For CSV with metadata, wrap in expected structure
+                    wrapped_data = {
+                        "artifact_type": metadata.get("artifact_type"),
+                        "description": metadata.get("description"),
+                        "source": metadata.get("source"),
+                        "record": raw_json_data[0]  # First row for single-record CSVs
+                    }
+                    # Remove None values
+                    wrapped_data = {k: v for k, v in wrapped_data.items() if v is not None}
+                    raw_json_data = wrapped_data
+                    # IMPORTANT: Also update the user message to use wrapped format
+                    user_message = json.dumps(wrapped_data, indent=2)
+                    print(f"[INFO] Wrapped CSV data with metadata structure for all agents")
+                else:
+                    # For non-CSV, just prepend metadata as text
+                    metadata_lines = []
+                    if metadata.get("artifact_type"):
+                        metadata_lines.append(f"Artifact Type: {metadata['artifact_type']}")
+                    if metadata.get("description"):
+                        metadata_lines.append(f"Description: {metadata['description']}")
+                    if metadata.get("source"):
+                        metadata_lines.append(f"Source: {metadata['source']}")
+
+                    if metadata_lines:
+                        metadata_str = "\n".join(metadata_lines)
+                        user_message = f"{metadata_str}\n\n{user_message}"
+                        print(f"[INFO] Prepended metadata to input")
+
             # Execute the workflow.
             # Start with DEFAULT_STATE to ensure all keys exist
             initial_state = dict(DEFAULT_STATE)
             # Merge request-specific fields
             initial_state["messages"] = [
                 ("system", "If the user message is JSON, treat it as authoritative source data."),
-                ("user", norm["as_text"]),
+                ("user", user_message),
             ]
-            initial_state["rawInputJSON"] = norm["raw_json"]
+            initial_state["rawInputJSON"] = raw_json_data
             initial_state["inputFormat"] = norm["format"]
 
             events = agent.stream(
@@ -130,7 +192,6 @@ def execute_forensic_analysis_session_stream(
                     else:
                         # For other fields, try to serialize or convert to string
                         try:
-                            import json
                             json.dumps(value)  # Test if serializable
                             serializable_event[key] = value
                         except (TypeError, ValueError):
@@ -162,7 +223,6 @@ def execute_forensic_analysis_session_stream(
                 else:
                     # For other fields, try to serialize or convert to string
                     try:
-                        import json
                         json.dumps(value)  # Test if serializable
                         serializable_final_event[key] = value
                     except (TypeError, ValueError):

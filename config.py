@@ -131,6 +131,9 @@ CUSTOM_FACET_AGENT_PROMPT = """You are Agent 2: Custom Facet Analysis Agent with
 
 CORE MISSION: Determine if custom facets are needed using rigorous element-by-element analysis, and generate formal TTL definition stubs for any new custom elements.
 
+🚨 UNMAPPED ELEMENTS DIRECTIVE:
+You will receive a list of "unmappedElements" from the previous agent. These elements were already determined to have NO suitable standard ontology properties after thorough analysis. For ALL elements in this list, you MUST create custom facet properties. Do not second-guess this determination - focus on creating appropriate custom extensions for each unmapped element.
+
 🔍 SYSTEMATIC REASONING PROCESS:
 STEP 1: COMPLETE INPUT EXTRACTION
 Parse ALL data elements from original user input (property names + values).
@@ -191,6 +194,28 @@ Every definition MUST include a rdfs:label (human-readable name) and a rdfs:comm
 
 Each property definition MUST include rdfs:domain (linking it to its new facet Class) and rdfs:range (specifying the data type, like xsd:string or xsd:integer).
 
+STEP 6: DYNAMIC FACET NAMING (MANDATORY)
+You MUST use contextual, dynamic naming for all custom facets based on the artifact_type from the input data.
+
+NAMING CONVENTION:
+1. Extract the "artifact_type" field from the input data
+2. Transform it to PascalCase (capitalize each word, remove spaces/separators)
+3. Append "ExtensionFacet" suffix
+4. Use this as the facet name in facetDefinitions
+
+EXAMPLES OF DYNAMIC NAMING:
+- "MFT Record" → "MftRecordExtensionFacet"
+- "Windows Prefetch" → "WindowsPrefetchExtensionFacet"
+- "Email Message" → "EmailMessageExtensionFacet"
+- "Network Log" → "NetworkLogExtensionFacet"
+- "Database Transaction" → "DatabaseTransactionExtensionFacet"
+
+DOMAIN-AGNOSTIC REQUIREMENT:
+This naming convention works for ANY artifact type - forensic, network, IoT, database, etc. Never use hardcoded facet names.
+
+FALLBACK NAMING:
+If artifact_type is missing or empty, use "UnknownArtifactExtensionFacet".
+
 ⚙️ CRITICAL REQUIREMENTS & OUTPUT FORMAT:
 Analysis: Apply systematic analysis to EVERY input element.
 
@@ -205,18 +230,18 @@ Coverage: Every input scalar must be covered exactly once.
 OUTPUT: Enhanced JSON with Systematic Analysis and TTL Definitions
 The final output is a JSON object. If custom facets are needed, it must include the ttlDefinitions key.
 
-Example 1: Creating a NEW CLASS
-Input Data: {"scanEngine": "Defender v2.4.1", "threatsFound": "3"}
+Example 1: Creating a NEW CLASS with Dynamic Naming
+Input Data: {"artifact_type": "Antivirus Scan", "scanEngine": "Defender v2.4.1", "threatsFound": "3"}
 
-Analysis: This represents a new concept not in the standard ontology.
+Analysis: artifact_type "Antivirus Scan" becomes "AntivirusScanExtensionFacet" following the dynamic naming convention.
 
 {
   "elementAnalysis": { "...detailed analysis for each element..." },
   "customFacets": {
     "facetDefinitions": {
-      "AntivirusScanFacet": {
+      "AntivirusScanExtensionFacet": {
         "namespace": "dfc-ext",
-        "reasoning": "Represents specialized antivirus scan results not covered by standard properties.",
+        "reasoning": "Extension facet for Antivirus Scan covering unmapped evidence fields.",
         "properties": {
           "dfc-ext:engineVersion": { "dataType": "xsd:string" },
           "dfc-ext:threatCount": { "dataType": "xsd:integer" }
@@ -225,14 +250,14 @@ Analysis: This represents a new concept not in the standard ontology.
     },
     "facetAssignments": [{
       "match": { "threatsFound": "3" },
-      "facet": "AntivirusScanFacet",
+      "facet": "AntivirusScanExtensionFacet",
       "values": {
         "dfc-ext:engineVersion": "Defender v2.4.1",
         "dfc-ext:threatCount": 3
       }
     }]
   },
-  "ttlDefinitions": "@prefix dfc-ext: [https://example.com/dfc-ext#](https://example.com/dfc-ext#) .\n@prefix uco-core: [https://ontology.unifiedcyberontology.org/uco/core#](https://ontology.unifiedcyberontology.org/uco/core#) .\n@prefix owl: [http://www.w3.org/2002/07/owl#](http://www.w3.org/2002/07/owl#) .\n@prefix rdfs: [http://www.w3.org/2000/01/rdf-schema#](http://www.w3.org/2000/01/rdf-schema#) .\n@prefix xsd: [http://www.w3.org/2001/XMLSchema#](http://www.w3.org/2001/XMLSchema#) .\n\n# Class Definition\ndfc-ext:AntivirusScanFacet\n  a owl:Class ;\n  rdfs:subClassOf uco-core:Facet ;\n  rdfs:label \"Antivirus Scan Facet\" ;\n  rdfs:comment \"Represents the results of a single antivirus scan event.\" .\n\n# Property Definitions\ndfc-ext:engineVersion\n  a owl:DatatypeProperty ;\n  rdfs:label \"Engine Version\" ;\n  rdfs:comment \"The version of the antivirus engine used.\" ;\n  rdfs:domain dfc-ext:AntivirusScanFacet ;\n  rdfs:range xsd:string .\n\ndfc-ext:threatCount\n  a owl:DatatypeProperty ;\n  rdfs:label \"Threat Count\" ;\n  rdfs:comment \"The number of threats detected.\" ;\n  rdfs:domain dfc-ext:AntivirusScanFacet ;\n  rdfs:range xsd:integer .\n",
+  "ttlDefinitions": "@prefix dfc-ext: [https://example.com/dfc-ext#](https://example.com/dfc-ext#) .\n@prefix uco-core: [https://ontology.unifiedcyberontology.org/uco/core#](https://ontology.unifiedcyberontology.org/uco/core#) .\n@prefix owl: [http://www.w3.org/2002/07/owl#](http://www.w3.org/2002/07/owl#) .\n@prefix rdfs: [http://www.w3.org/2000/01/rdf-schema#](http://www.w3.org/2000/01/rdf-schema#) .\n@prefix xsd: [http://www.w3.org/2001/XMLSchema#](http://www.w3.org/2001/XMLSchema#) .\n\n# Class Definition\ndfc-ext:AntivirusScanExtensionFacet\n  a owl:Class ;\n  rdfs:subClassOf uco-core:Facet ;\n  rdfs:label \"Antivirus Scan Extension Facet\" ;\n  rdfs:comment \"Extension facet for Antivirus Scan capturing unmapped evidence fields.\" .\n\n# Property Definitions\ndfc-ext:engineVersion\n  a owl:DatatypeProperty ;\n  rdfs:label \"Engine Version\" ;\n  rdfs:comment \"The version of the antivirus engine used.\" ;\n  rdfs:domain dfc-ext:AntivirusScanExtensionFacet ;\n  rdfs:range xsd:string .\n\ndfc-ext:threatCount\n  a owl:DatatypeProperty ;\n  rdfs:label \"Threat Count\" ;\n  rdfs:comment \"The number of threats detected.\" ;\n  rdfs:domain dfc-ext:AntivirusScanExtensionFacet ;\n  rdfs:range xsd:integer .\n",
   "customState": {
     "customFacetsNeeded": true,
     "...": "..."
@@ -240,17 +265,17 @@ Analysis: This represents a new concept not in the standard ontology.
 }
 
 Example 2: Extending an EXISTING CLASS (by adding a new facet)
-Input Data: {"fileName": "report.docx", "projectCode": "FIN-1234"}
+Input Data: {"artifact_type": "Digital Document", "fileName": "report.docx", "projectCode": "FIN-1234"}
 
-Analysis: fileName maps to a standard File property, but projectCode is a custom, internal identifier that needs its own facet.
+Analysis: artifact_type "Digital Document" becomes "DigitalDocumentExtensionFacet". fileName maps to a standard File property, but projectCode is a custom identifier that needs the extension facet.
 
 {
   "elementAnalysis": { "...detailed analysis for each element..." },
   "customFacets": {
     "facetDefinitions": {
-      "InternalMetadataFacet": {
+      "DigitalDocumentExtensionFacet": {
         "namespace": "dfc-ext",
-        "reasoning": "Captures internal organizational metadata, like project codes, not present in standard ontologies.",
+        "reasoning": "Extension facet for Digital Document covering unmapped evidence fields.",
         "properties": {
           "dfc-ext:projectCode": { "dataType": "xsd:string" }
         }
@@ -258,13 +283,13 @@ Analysis: fileName maps to a standard File property, but projectCode is a custom
     },
     "facetAssignments": [{
       "match": { "fileName": "report.docx" },
-      "facet": "InternalMetadataFacet",
+      "facet": "DigitalDocumentExtensionFacet",
       "values": {
         "dfc-ext:projectCode": "FIN-1234"
       }
     }]
   },
-  "ttlDefinitions": "@prefix dfc-ext: [https://example.com/dfc-ext#](https://example.com/dfc-ext#) .\n@prefix uco-core: [https://ontology.unifiedcyberontology.org/uco/core#](https://ontology.unifiedcyberontology.org/uco/core#) .\n@prefix owl: [http://www.w3.org/2002/07/owl#](http://www.w3.org/2002/07/owl#) .\n@prefix rdfs: [http://www.w3.org/2000/01/rdf-schema#](http://www.w3.org/2000/01/rdf-schema#) .\n@prefix xsd: [http://www.w3.org/2001/XMLSchema#](http://www.w3.org/2001/XMLSchema#) .\n\n# Class Definition\ndfc-ext:InternalMetadataFacet\n  a owl:Class ;\n  rdfs:subClassOf uco-core:Facet ;\n  rdfs:label \"Internal Metadata Facet\" ;\n  rdfs:comment \"A facet for storing internal or organization-specific metadata about an object.\" .\n\n# Property Definition\ndfc-ext:projectCode\n  a owl:DatatypeProperty ;\n  rdfs:label \"Project Code\" ;\n  rdfs:comment \"An internal project identifier associated with an asset.\" ;\n  rdfs:domain dfc-ext:InternalMetadataFacet ;\n  rdfs:range xsd:string .\n",
+  "ttlDefinitions": "@prefix dfc-ext: [https://example.com/dfc-ext#](https://example.com/dfc-ext#) .\n@prefix uco-core: [https://ontology.unifiedcyberontology.org/uco/core#](https://ontology.unifiedcyberontology.org/uco/core#) .\n@prefix owl: [http://www.w3.org/2002/07/owl#](http://www.w3.org/2002/07/owl#) .\n@prefix rdfs: [http://www.w3.org/2000/01/rdf-schema#](http://www.w3.org/2000/01/rdf-schema#) .\n@prefix xsd: [http://www.w3.org/2001/XMLSchema#](http://www.w3.org/2001/XMLSchema#) .\n\n# Class Definition\ndfc-ext:DigitalDocumentExtensionFacet\n  a owl:Class ;\n  rdfs:subClassOf uco-core:Facet ;\n  rdfs:label \"Internal Metadata Facet\" ;\n  rdfs:comment \"A facet for storing internal or organization-specific metadata about an object.\" .\n\n# Property Definition\ndfc-ext:projectCode\n  a owl:DatatypeProperty ;\n  rdfs:label \"Project Code\" ;\n  rdfs:comment \"An internal project identifier associated with an asset.\" ;\n  rdfs:domain dfc-ext:DigitalDocumentExtensionFacet ;\n  rdfs:range xsd:string .\n",
   "customState": {
     "customFacetsNeeded": true,
     "...": "..."
@@ -604,4 +629,90 @@ Skeleton Illustration (for understanding only — runtime builds this for you)
 
 
 Remember: You map properties onto these pre‑planned nodes ONLY (per ownership in <ontologyMap/>), then link facets via "uco-core:hasFacet" as ID refs. No property with null should be shown in output Example uco-observable: null (this kind shouldnt be shown)
+
+### Gold Standard Examples
+
+Use the following 'Gold Standard Examples' as a template for the structure of your output. Pay close attention to the placement of properties on objects and their facets. These examples demonstrate proper CASE/UCO JSON-LD structure from the official CASE Examples repository.
+
+#### Example 1: File/ContentData Object with Multiple Facets
+```json
+{
+  "@id": "kb:file-5c53068f-0843-4f51-8a2c-0a81a8ff86f8",
+  "@type": [
+    "uco-observable:ContentData",
+    "uco-observable:RecoveredObject"
+  ],
+  "uco-core:hasFacet": [
+    {
+      "@id": "kb:recovered-object-facet-cb087927-5970-4361-a958-5343e81b189d",
+      "@type": "uco-observable:RecoveredObjectFacet",
+      "uco-observable:contentRecoveredStatus": "recovered",
+      "uco-observable:metadataRecoveredStatus": "unknown",
+      "uco-observable:nameRecoveredStatus": "unknown"
+    },
+    {
+      "@id": "kb:content-data-facet-3839294c-0007-4518-8598-1f5d6c7a8000",
+      "@type": "uco-observable:ContentDataFacet",
+      "uco-observable:byteOrder": "Big-endian",
+      "uco-observable:sizeInBytes": 1625600,
+      "uco-observable:mimeType": "image/jpg",
+      "uco-observable:hash": [
+        {
+          "@id": "kb:hash-a6e58409-9013-51a9-846b-64aa0741ebca",
+          "@type": "uco-types:Hash",
+          "uco-types:hashMethod": "SHA256",
+          "uco-types:hashValue": {
+            "@type": "xsd:hexBinary",
+            "@value": "fb07a847daf108af066b4cc55f807a3eb694b9b31e27d8146585b7cc08494c70"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Example 2: Message Object with MessageFacet
+```json
+{
+  "@id": "kb:message-d8330d5a-b8de-4425-9cd8-a37b038afe81",
+  "@type": "uco-observable:Message",
+  "uco-core:hasFacet": [
+    {
+      "@type": "uco-observable:MessageFacet",
+      "uco-observable:messageText": "Hey bud!",
+      "uco-observable:from": "kb:account-3b61cb4c-f5fd-428c-80d7-79ac841a4f87",
+      "uco-observable:to": ["kb:account-16f128ac-7e5b-4cac-908c-11062488eb06"],
+      "uco-observable:sentTime": "2010-01-15T17:59:43.25Z"
+    }
+  ]
+}
+```
+
+#### Example 3: EmailAccount Object with Multiple Facets
+```json
+{
+  "@id": "kb:email-account-sarah-mcavoy",
+  "@type": "uco-observable:EmailAccount",
+  "uco-core:hasFacet": [
+    {
+      "@type": "uco-observable:EmailAccountFacet",
+      "uco-observable:emailAddress": "mcavoys87@gmail.com"
+    },
+    {
+      "@type": "uco-observable:DigitalAccountFacet",
+      "uco-observable:accountLogin": "mcavoys87@gmail.com",
+      "uco-observable:accountPassword": "louisville!21"
+    }
+  ]
+}
+```
+
+**Key Patterns to Follow:**
+1. **Object-Facet Separation**: Main objects (File, Message, EmailAccount) contain only @id, @type, and uco-core:hasFacet
+2. **Property Placement**: All descriptive properties are placed on facets, not on the parent object
+3. **Facet References**: uco-core:hasFacet contains either @id references to separate facet nodes, or inline facet objects
+4. **Multiple Facets**: Objects can have multiple specialized facets for different aspects of the data
+5. **Proper Typing**: Each facet has its specific @type (e.g., MessageFacet, EmailAccountFacet)
+
 """

@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, List
+from typing import Any, Dict, List
 
 from langchain_core.messages import HumanMessage
 
@@ -15,6 +15,88 @@ from config import (
 from utils import _get_input_artifacts
 from agents.hallucination_checker import FeedbackProcessingAgent, DynamicCorrectionAgent
 
+
+DEFAULT_CONTEXT = {
+    "case-investigation": "https://ontology.caseontology.org/case/investigation/",
+    "kb": "http://example.org/kb/",
+    "drafting": "http://example.org/ontology/drafting/",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "uco-action": "https://ontology.unifiedcyberontology.org/uco/action/",
+    "core": "https://ontology.unifiedcyberontology.org/uco/core/",
+    "identity": "https://ontology.unifiedcyberontology.org/uco/identity/",
+    "location": "https://ontology.unifiedcyberontology.org/uco/location/",
+    "observable": "https://ontology.unifiedcyberontology.org/uco/observable/",
+    "tool": "https://ontology.unifiedcyberontology.org/uco/tool/",
+    "types": "https://ontology.unifiedcyberontology.org/uco/types/",
+    "vocabulary": "https://ontology.unifiedcyberontology.org/uco/vocabulary/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dfc-ext": "https://www.w3.org/dfc-ext/"
+}
+
+def _enforce_property_placement(graph: dict, ontology_map: dict) -> dict:
+    """
+    Programmatically enforces correct property placement by moving properties
+    from parent objects to their appropriate facets based on the ontology map.
+    """
+    print("[INFO] [Graph Cleanup] Running _enforce_property_placement...")
+    
+    graph_nodes = graph.get("@graph", [])
+    if not graph_nodes:
+        return graph
+
+    nodes_by_id = {node["@id"]: node for node in graph_nodes}
+    
+    # Create a map of {property_name: facet_type}
+    prop_to_facet_map = {}
+    if isinstance(ontology_map.get("properties"), dict):
+        for owner, props in ontology_map["properties"].items():
+            if owner.endswith("Facet"):
+                for prop in props:
+                    prop_to_facet_map[prop] = owner
+
+    for node in graph_nodes:
+        node_type = node.get("@type", "")
+        if isinstance(node_type, str) and node_type.endswith("Facet"):
+            continue
+
+        properties_to_move = {}
+        for prop, value in node.items():
+            if prop in ["@id", "@type", "uco-core:hasFacet"]:
+                continue
+            
+            prop_name = prop.split(":")[-1]
+            if prop_name in prop_to_facet_map:
+                properties_to_move[prop] = value
+        
+        if properties_to_move:
+            print(f"[INFO] [Graph Cleanup] Found {len(properties_to_move)} misplaced properties on node {node.get('@id')}")
+            
+            facet_refs = node.get("uco-core:hasFacet", [])
+            if not facet_refs:
+                continue
+
+            for prop, value in properties_to_move.items():
+                prop_name = prop.split(":")[-1]
+                target_facet_type = prop_to_facet_map.get(prop_name)
+                
+                target_facet_node = None
+                for facet_ref in facet_refs:
+                    facet_id = facet_ref.get("@id")
+                    if facet_id in nodes_by_id:
+                        facet_node = nodes_by_id[facet_id]
+                        if facet_node.get("@type") == target_facet_type:
+                            target_facet_node = facet_node
+                            break
+                
+                if target_facet_node is not None:
+                    target_facet_node[prop] = value
+                    del node[prop]
+                    print(f"[INFO] [Graph Cleanup] Moved '{prop}' to facet {target_facet_node.get('@id')}")
+                else:
+                    print(f"[WARNING] [Graph Cleanup] Could not find a suitable facet for property '{prop}'")
+
+    return graph
 
 def _normalise_value(value: Any) -> Any:
     if isinstance(value, dict):
@@ -64,6 +146,75 @@ def format_hallucination_instructions(recent_feedbacks: List[str]) -> str:
 5. Double-check every value against the original input.\n\nFAILURE TO FOLLOW THESE RULES WILL RESULT IN ANOTHER HALLUCINATION FAILURE.
 """
     return instructions
+
+
+def _assign_properties(node: Dict[str, Any], properties: Dict[str, Any]) -> None:
+    for prop, value in (properties or {}).items():
+        # Skip None values and empty strings
+        if value is None or value == "":
+            continue
+        node[prop] = value
+
+
+def _slugify(name: str) -> str:
+    return name.replace(" ", "_").replace("-", "_").lower()
+
+
+def _build_deterministic_graph(
+    skeleton_graph: Dict[str, Any],
+    uuid_plan: List[Dict[str, str]],
+    source_property_map: Dict[str, Dict[str, Any]],
+    custom_facets: Dict[str, Any],
+) -> Dict[str, Any]:
+    nodes_by_id = {node["@id"]: node for node in skeleton_graph.get("@graph", [])}
+
+    # Apply ontology-mapped properties
+    for node_id, mapping in (source_property_map or {}).items():
+        node = nodes_by_id.get(node_id)
+        if not node:
+            continue
+        _assign_properties(node, mapping.get("properties") or {})
+
+    # Map facet name to UUID using slug lookup
+    slug_to_uuid: Dict[str, str] = {}
+    for plan_row in uuid_plan or []:
+        for slug, slot_uuid in plan_row.items():
+            slug_to_uuid[slug] = slot_uuid
+
+    for assignment in custom_facets.get("facetAssignments", []) or []:
+        facet_name = assignment.get("facet")
+        if not facet_name:
+            continue
+        facet_uuid = slug_to_uuid.get(_slugify(facet_name))
+        if not facet_uuid:
+            continue
+        node = nodes_by_id.get(facet_uuid)
+        if not node:
+            continue
+        values = assignment.get("values", {})
+        filtered_values = {k: v for k, v in values.items() if v is not None}
+        if filtered_values:
+            _assign_properties(node, filtered_values)
+
+    # Prune empty facet nodes
+    filtered_nodes: List[Dict[str, Any]] = []
+    empty_facets = set()
+    for node in skeleton_graph.get("@graph", []):
+        node_type = node.get("@type", "")
+        if isinstance(node_type, str) and node_type.lower().endswith("facet"):
+            has_payload = any(key not in ("@id", "@type", "uco-core:hasFacet") for key in node)
+            if not has_payload:
+                empty_facets.add(node.get("@id"))
+                continue
+        filtered_nodes.append(node)
+
+    if empty_facets:
+        for node in filtered_nodes:
+            facets = node.get("uco-core:hasFacet")
+            if facets:
+                node["uco-core:hasFacet"] = [ref for ref in facets if ref.get("@id") not in empty_facets]
+
+    return {"@context": DEFAULT_CONTEXT, "@graph": filtered_nodes}
 
 
 def graph_generator_node(state: State) -> dict:
@@ -141,7 +292,7 @@ def graph_generator_node(state: State) -> dict:
                     if "relationship" in lower_slug or slot_type_lower.endswith("relationship"):
                         include_slot = bool(payload.get("properties") or payload.get("raw"))
                     elif "facet" in lower_slug:
-                        include_slot = bool(payload.get("properties") or payload.get("raw"))
+                        include_slot = True
                 if not include_slot:
                     continue
                 node = {
@@ -167,14 +318,25 @@ def graph_generator_node(state: State) -> dict:
                 if parent_node:
                     parent_node["uco-core:hasFacet"] = facet_refs
 
-    error_feedback = ""
-    if graph_errors:
-        error_feedback = f"\n\nPREVIOUS ERRORS TO CONSIDER:\n{chr(10).join(graph_errors[-2:])}\n\nPlease fix these issues in your JSON-LD generation."
+    json_obj = None
+    used_llm = False
+    try:
+        print("[INFO] [Graph Generator] Attempting deterministic composition...")
+        json_obj = _build_deterministic_graph(skeleton_graph, uuid_plan, source_properties, custom_facets)
+        print(
+            f"[SUCCESS] [Graph Generator] Deterministic JSON-LD generated with {len(json_obj.get('@graph', []))} entities")
+    except Exception as det_exc:
+        print(f"[WARNING] [Graph Generator] Deterministic composition failed: {det_exc}. Falling back to LLM.")
+        json_obj = None
 
-    dynamic_instructions = format_hallucination_instructions(
-        layer2_feedback_history)
+    if json_obj is None:
+        error_feedback = ""
+        if graph_errors:
+            error_feedback = f"\n\nPREVIOUS ERRORS TO CONSIDER:\n{chr(10).join(graph_errors[-2:])}\n\nPlease fix these issues in your JSON-LD generation."
 
-    prompt = f"""
+        dynamic_instructions = format_hallucination_instructions(layer2_feedback_history)
+
+        prompt = f"""
 ## GRAPH SKELETON (Your starting point):
 Your task is to fill in the properties for each entity in this pre-built graph skeleton based on the other information provided.
 Do NOT add new entities. Do NOT change the @id or @type of existing entities.
@@ -185,11 +347,11 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
 ## STANDARD ONTOLOGY KEYS (from Agent 1):
 {json.dumps(ontology_map, indent=2)}
 
-   ## CUSTOM FACETS (from Agent 2):
-   {json.dumps(custom_facets, indent=2)}
+## CUSTOM FACETS (from Agent 2):
+{json.dumps(custom_facets, indent=2)}
 
-   ## SOURCE PROPERTY MAP (directly from evidence fields):
-   {json.dumps(source_properties, indent=2)}
+## SOURCE PROPERTY MAP (directly from evidence fields):
+{json.dumps(source_properties, indent=2)}
 
 ## VALIDATION FEEDBACK FOR CORRECTION:
 {validation_feedback}
@@ -199,114 +361,79 @@ Do NOT add new entities. Do NOT change the @id or @type of existing entities.
 {dynamic_instructions}
 
 ## INSTRUCTIONS:
-1.  Review the source data (in the ontology and custom facet maps).
-   2.  For each entity in the GRAPH SKELETON, add the relevant properties and values, pulling data from SOURCE PROPERTY MAP when present.
-3.  Return the completed JSON-LD graph.
-
-## CRITICAL REMINDER ON PROPERTY PLACEMENT:
-- The MOST IMPORTANT rule is the separation of object and facet properties.
-- A property like `uco-observable:filePath` or `uco-observable:createdTime` MUST NOT appear on a `uco-observable:File` node.
-- These properties MUST be placed on the corresponding facet node (e.g., `uco-observable:FileFacet`).
-- The parent `File` node should ONLY contain the `uco-core:hasFacet` property pointing to its facets.
-   - VIOLATING THIS RULE WILL CAUSE IMMEDIATE SYSTEM FAILURE. Double-check every property's location before outputting the graph.
-
-   ## CRITICAL DATA INTEGRITY RULE:
-   - You MUST NOT invent property values. Only use literals provided in SOURCE PROPERTY MAP or CUSTOM FACETS. If a value is absent, omit the property.
+1. Review the source data and apply every property exactly where indicated.
+2. For each slot in the skeleton, copy the values from SOURCE PROPERTY MAP without renaming keys.
+3. If a facet assignment is provided, add those properties verbatim to that facet node.
+4. Return a single JSON object containing `@context` and `@graph`.
 """
 
+        try:
+            system_content = GRAPH_GENERATOR_AGENT_PROMPT
+            response = llm.invoke([
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt},
+            ])
+
+            graph_out = response.content
+
+            json_obj = None
+            m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", graph_out, re.DOTALL)
+            if m:
+                json_content = m.group(1).strip()
+            else:
+                json_content = graph_out.strip()
+
+            if not json_content:
+                raise ValueError("Empty JSON content received from LLM")
+
+            llm_json_obj = json.loads(json_content)
+            json_obj = _merge_llm_output_into_skeleton(skeleton_graph, llm_json_obj)
+
+            if "@context" not in json_obj:
+                json_obj["@context"] = DEFAULT_CONTEXT
+
+            if "@context" not in json_obj or "@graph" not in json_obj:
+                raise ValueError("Invalid JSON-LD structure: missing @context or @graph")
+
+            print(
+                f"[SUCCESS] [Graph Generator] Successfully generated JSON-LD with {len(json_obj.get('@graph', []))} entities")
+
+            used_llm = True
+
+        except Exception as e:
+            error_msg = f"Processing failed on attempt {current_attempts + 1}: {e}"
+            print(f"[ERROR] [Graph Generator] {error_msg}")
+            return {
+                "graphGeneratorAttempts": current_attempts + 1,
+                "graphGeneratorErrors": graph_errors + [error_msg],
+            }
+
+    if layer2_feedback_history:
+        correction_agent = DynamicCorrectionAgent(llm)
+        original_input = _get_input_artifacts(state)
+        for feedback in layer2_feedback_history:
+            json_obj = correction_agent.apply_corrections(json_obj, feedback, original_input)
+
+    if "@context" not in json_obj:
+        json_obj["@context"] = DEFAULT_CONTEXT
+
+    # Final cleanup step to enforce property placement
     try:
-        # Use standard LLM without tool binding since we have deterministic UUIDs
-        system_content = GRAPH_GENERATOR_AGENT_PROMPT
-        response = llm.invoke([
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": prompt}
-        ])
-
-        graph_out = response.content
-
-        json_obj = None
-        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", graph_out, re.DOTALL)
-        if m:
-            json_content = m.group(1).strip()
-        else:
-            json_content = graph_out.strip()
-
-        if not json_content:
-            raise ValueError("Empty JSON content received from LLM")
-
-        llm_json_obj = json.loads(json_content)
-
-        # Merge the LLM's output into our skeleton to preserve all nodes
-        json_obj = _merge_llm_output_into_skeleton(skeleton_graph, llm_json_obj)
-
-        # Ensure the context is present in the final graph
-        if "@context" not in json_obj:
-            json_obj["@context"] = {
-                "case-investigation": "https://ontology.caseontology.org/case/investigation/",
-                "kb": "http://example.org/kb/",
-                "drafting": "http://example.org/ontology/drafting/",
-                "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-                "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-                "uco-action": "https://ontology.unifiedcyberontology.org/uco/action/",
-                "core": "https://ontology.unifiedcyberontology.org/uco/core/",
-                "identity": "https://ontology.unifiedcyberontology.org/uco/identity/",
-                "location": "https://ontology.unifiedcyberontology.org/uco/location/",
-                "observable": "https://ontology.unifiedcyberontology.org/uco/observable/",
-                "tool": "https://ontology.unifiedcyberontology.org/uco/tool/",
-                "types": "https://ontology.unifiedcyberontology.org/uco/types/",
-                "vocabulary": "https://ontology.unifiedcyberontology.org/uco/vocabulary/",
-                "xsd": "http://www.w3.org/2001/XMLSchema#",
-                "dfc-ext": "https://www.w3.org/dfc-ext/"
-            }
-
-        if "@context" not in json_obj or "@graph" not in json_obj:
-            raise ValueError(
-                "Invalid JSON-LD structure: missing @context or @graph")
-
-        if layer2_feedback_history:
-            correction_agent = DynamicCorrectionAgent(llm)
-            original_input = _get_input_artifacts(state)
-            for feedback in layer2_feedback_history:
-                json_obj = correction_agent.apply_corrections(
-                    json_obj, feedback, original_input)
-
-        # Ensure the context is present in the final graph
-        if "@context" not in json_obj:
-            json_obj["@context"] = {
-                "case-investigation": "https://ontology.caseontology.org/case/investigation/",
-                "kb": "http://example.org/kb/",
-                "drafting": "http://example.org/ontology/drafting/",
-                "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-                "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-                "uco-action": "https://ontology.unifiedcyberontology.org/uco/action/",
-                "core": "https://ontology.unifiedcyberontology.org/uco/core/",
-                "identity": "https://ontology.unifiedcyberontology.org/uco/identity/",
-                "location": "https://ontology.unifiedcyberontology.org/uco/location/",
-                "observable": "https://ontology.unifiedcyberontology.org/uco/observable/",
-                "tool": "https://ontology.unifiedcyberontology.org/uco/tool/",
-                "types": "https://ontology.unifiedcyberontology.org/uco/types/",
-                "vocabulary": "https://ontology.unifiedcyberontology.org/uco/vocabulary/",
-                "xsd": "http://www.w3.org/2001/XMLSchema#",
-                "dfc-ext": "https://www.w3.org/dfc-ext/"
-            }
-
-        # Validation removed - let LLM have full control over graph generation
-        # The LLM has all necessary context from ontology research, custom facets, and source data
-
-        print(
-            f"[SUCCESS] [Graph Generator] Successfully generated JSON-LD with {len(json_obj.get('@graph', []))} entities")
-
-        return {
-            "jsonldGraph": json_obj,
-            "graphGeneratorAttempts": current_attempts + 1,
-            "messages": [HumanMessage(content=json.dumps(json_obj, indent=2), name="graph_generator_agent")]
-        }
-
+        json_obj = _enforce_property_placement(json_obj, ontology_map)
     except Exception as e:
-        error_msg = f"Processing failed on attempt {current_attempts + 1}: {str(e)}"
-        print(f"[ERROR] [Graph Generator] {error_msg}")
-        return {
-            "graphGeneratorAttempts": current_attempts + 1,
-            "graphGeneratorErrors": graph_errors + [error_msg],
-        }
+        print(f"[WARNING] [Graph Cleanup] Failed to enforce property placement: {e}")
 
+    return {
+        "jsonldGraph": json_obj,
+        "graphGeneratorAttempts": current_attempts + 1,
+        "messages": [
+            HumanMessage(
+                content=(
+                    "JSON-LD graph generated via deterministic mapper."
+                    if not used_llm
+                    else "JSON-LD graph generated via LLM fallback."
+                ),
+                name="graph_generator_agent",
+            )
+        ],
+    }

@@ -78,18 +78,63 @@ with col1:
 
     # Forensic artifacts input
     st.subheader("Forensic Artifacts")
-    input_artifacts = st.text_area(
-        "Paste your forensic artifact description here:",
-        height=300,
-        placeholder="""Example:
+
+    # Input method selection
+    input_method = st.radio(
+        "Select input method:",
+        options=["Text Input", "CSV File Upload"],
+        horizontal=True,
+        help="Choose whether to paste text directly or upload a CSV file"
+    )
+
+    # Text input or CSV file upload based on selection
+    input_artifacts = None
+    uploaded_file = None
+
+    if input_method == "Text Input":
+        input_artifacts = st.text_area(
+            "Paste your forensic artifact description here:",
+            height=300,
+            placeholder="""Example:
 Artifact: Windows Prefetch File
 - Path: C:\\Windows\\Prefetch\\MALICIOUS.EXE-12345678.pf
 - Created: 2025-09-17T10:30:00Z
 - Process ID: 4567
 - Executable: MALICIOUS.EXE
 - Last Run: 2025-09-17T10:35:15Z""",
-        help="Enter unstructured text describing the digital forensic artifact"
-    )
+            help="Enter unstructured text describing the digital forensic artifact"
+        )
+    else:  # CSV File Upload
+        # Metadata fields for CSV context
+        st.markdown("**Provide Context for Your CSV Data:**")
+        artifact_type = st.text_input(
+            "Artifact Type",
+            placeholder="e.g., MFT Record, Browser History, Registry Key",
+            help="Specify the type of forensic artifact in your CSV"
+        )
+        description = st.text_input(
+            "Description",
+            placeholder="e.g., File system metadata from forensic image",
+            help="Describe what this data represents"
+        )
+        source = st.text_input(
+            "Source",
+            placeholder="e.g., suspect_laptop_image.E01",
+            help="Specify the source of this data"
+        )
+
+        st.markdown("**Upload CSV File:**")
+        uploaded_file = st.file_uploader(
+            "Choose a CSV file:",
+            type=["csv"],
+            help="Upload a CSV file containing forensic artifact data. Each row represents one artifact."
+        )
+
+        if uploaded_file is not None:
+            st.success(f"✅ File uploaded: {uploaded_file.name}")
+            if artifact_type or description or source:
+                st.info("✓ Context metadata provided")
+            st.info("Click 'Run Analysis' to process the CSV file")
 
     # Run analysis button
     run_analysis = st.button(
@@ -144,7 +189,10 @@ logger.info(
     f"🚀 [APP COMPLETE] Total app startup completed in {total_startup_time:.3f}s")
 
 # Handle button click
-if run_analysis and input_artifacts.strip():
+# Check if we have either text input or uploaded file
+has_input = (input_artifacts and input_artifacts.strip()) or (uploaded_file is not None)
+
+if run_analysis and has_input:
     if not st.session_state.analysis_running:
         st.session_state.analysis_running = True
 
@@ -169,18 +217,37 @@ if run_analysis and input_artifacts.strip():
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            # Try to parse as JSON; if it fails, send as text
-            parsed = None
-            try:
-                parsed = json.loads(input_artifacts)
-            except Exception:
-                pass
+            # Handle CSV file upload or text input
+            if uploaded_file is not None:
+                # Read CSV file content as string
+                csv_content = uploaded_file.read().decode("utf-8")
 
-            # Prepare API request data
-            api_data = {
-                "user_identifier": user_identifier,
-                "input_artifacts": parsed if parsed is not None else input_artifacts
-            }
+                # Prepare API request data with CSV content and metadata
+                api_data = {
+                    "user_identifier": user_identifier,
+                    "input_artifacts": csv_content
+                }
+
+                # Add metadata if provided
+                if artifact_type:
+                    api_data["artifact_type"] = artifact_type
+                if description:
+                    api_data["description"] = description
+                if source:
+                    api_data["source"] = source
+            else:
+                # Try to parse as JSON; if it fails, send as text
+                parsed = None
+                try:
+                    parsed = json.loads(input_artifacts)
+                except Exception:
+                    pass
+
+                # Prepare API request data
+                api_data = {
+                    "user_identifier": user_identifier,
+                    "input_artifacts": parsed if parsed is not None else input_artifacts
+                }
 
             # Make streaming request to FastAPI server
             response = requests.post(
@@ -251,9 +318,16 @@ if run_analysis and input_artifacts.strip():
                             progress_bar.progress(0)
                             status_text.text("❌ Analysis failed")
 
+                            error_message = data['data']['error']
                             with log_display:
-                                st.error(
-                                    f"❌ Analysis failed: {data['data']['error']}")
+                                st.error(f"❌ Analysis failed: {error_message}")
+
+                                # Display helpful message for CSV-specific errors
+                                if "csv" in error_message.lower() or "invalid format" in error_message.lower():
+                                    st.info("💡 **CSV Tips:**\n"
+                                           "- Ensure your CSV has headers\n"
+                                           "- Check for proper column formatting\n"
+                                           "- Verify the file is not corrupted")
                             break
 
                         elif data["type"] == "stream_error":
@@ -342,8 +416,8 @@ if run_analysis and input_artifacts.strip():
         finally:
             st.session_state.analysis_running = False
 
-elif run_analysis and not input_artifacts.strip():
-    st.error("⚠️ Please enter forensic artifact description before running analysis")
+elif run_analysis and not has_input:
+    st.error("⚠️ Please enter forensic artifact description or upload a CSV file before running analysis")
 
 # Sidebar with additional information
 with st.sidebar:

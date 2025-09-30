@@ -29,21 +29,39 @@ def _slugify(name: str) -> str:
 
 def _extract_records(raw_input: object) -> List[Dict]:
     """Normalise the raw input into a list of per-record dictionaries."""
+
     if isinstance(raw_input, list):
         return [rec for rec in raw_input if isinstance(rec, dict)]
 
     if isinstance(raw_input, dict):
         records = raw_input.get("records")
         if isinstance(records, list):
-            # fan-out: merge shared metadata with each record without overwriting per-record fields
-            shared = {k: v for k, v in raw_input.items() if k != "records"}
-            normalised = []
+            # Fan-out: flatten each record while preserving shared metadata (e.g., description)
+            shared = {
+                k: v for k, v in raw_input.items()
+                if k not in ("records", "record")
+            }
+            normalised: List[Dict] = []
             for rec in records:
                 if isinstance(rec, dict):
-                    merged = {**shared, **rec}
-                    normalised.append(merged)
-            return normalised
-        return [raw_input]
+                    flattened = {**shared}
+                    flattened.update(rec)
+                    normalised.append(flattened)
+            if normalised:
+                return normalised
+
+        # Single-record payloads store evidence under the "record" key; flatten it.
+        single_record = raw_input.get("record")
+        if isinstance(single_record, dict):
+            shared = {
+                k: v for k, v in raw_input.items()
+                if k not in ("records", "record")
+            }
+            flattened = {**shared}
+            flattened.update(single_record)
+            return [flattened]
+
+        return [raw_input] if raw_input else []
 
     return []
 
@@ -67,7 +85,7 @@ def _normalize_key(name: str) -> str:
 
 def _tokenize(name: str) -> List[str]:
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
-    spaced = spaced.replace("_", " ").replace("-", " ")
+    spaced = spaced.replace("_", " ").replace("-", " ").replace(":", " ")
     return [tok for tok in spaced.lower().split() if tok]
 
 
@@ -118,6 +136,7 @@ def _qualify_property(prop_name: str) -> str:
 def _build_source_property_map(records: List[Dict], plan_rows: List[OrderedDict[str, str]], slot_type_map: Dict[str, str], ontology_map: Dict[str, Dict]) -> Dict[str, Dict[str, Dict]]:
     source_map: Dict[str, Dict[str, Dict]] = {}
     property_index = _prepare_property_index(ontology_map.get("properties", {}))
+    property_field_map = (ontology_map.get("additional_details", {}) or {}).get("propertyFieldMap", {})
 
     for record, plan_row in zip(records, plan_rows):
         if not plan_row:
@@ -133,6 +152,29 @@ def _build_source_property_map(records: List[Dict], plan_rows: List[OrderedDict[
                 "raw": {}
             })
 
+        # Apply explicit property mappings from markdown tables first
+        if property_field_map:
+            for owner, prop_map in property_field_map.items():
+                owner_slug = _slugify(owner)
+                target_slug = owner_slug if owner_slug in slug_to_uuid else primary_slug
+                slot_uuid = slug_to_uuid.get(target_slug)
+                if not slot_uuid:
+                    continue
+                slot_entry = source_map[slot_uuid]
+                for prop_name, fields in (prop_map or {}).items():
+                    if not fields:
+                        continue
+                    value = None
+                    for field_name in fields:
+                        if isinstance(record, dict) and field_name in record and record[field_name] is not None:
+                            value = record[field_name]
+                            break
+                    if value is None:
+                        continue
+                    qualified = _qualify_property(prop_name)
+                    slot_entry["properties"][qualified] = value
+
+        # Fallback heuristic mapping for properties without explicit rows
         for raw_key, value in record.items():
             normalized_key = _normalize_key(raw_key)
             owner_slug, prop_name = _match_property(normalized_key, property_index)
