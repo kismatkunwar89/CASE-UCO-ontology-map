@@ -6,6 +6,8 @@ Refactored from main.py to separate concerns and enable API integration.
 import os
 import uuid
 import json
+import csv
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Generator, Dict, Any
@@ -24,7 +26,7 @@ def _normalize_input(input_artifacts: Any) -> Dict[str, Any]:
       {
         'as_text': str,     # what we feed the LLM as user message
         'raw_json': Any,    # original object or None
-        'format': 'json' | 'text'
+        'format': 'json' | 'text' | 'csv'
       }
     """
     if isinstance(input_artifacts, (dict, list)):
@@ -33,6 +35,28 @@ def _normalize_input(input_artifacts: Any) -> Dict[str, Any]:
             "raw_json": input_artifacts,
             "format": "json",
         }
+
+    # Check if input is CSV format (string with commas and newlines)
+    if isinstance(input_artifacts, str):
+        # Try to detect CSV format by checking for common CSV patterns
+        lines = input_artifacts.strip().split('\n')
+        if len(lines) > 1 and ',' in lines[0]:
+            try:
+                # Attempt to parse as CSV with strict error handling
+                csv_reader = csv.DictReader(io.StringIO(input_artifacts), strict=True)
+                parsed_rows = list(csv_reader)
+
+                if parsed_rows:
+                    # Successfully parsed as CSV
+                    return {
+                        "as_text": json.dumps(parsed_rows, indent=2),
+                        "raw_json": parsed_rows,
+                        "format": "csv",
+                    }
+            except (csv.Error, Exception) as e:
+                # If CSV parsing fails, raise a user-friendly error
+                raise ValueError(f"Invalid CSV format: {str(e)}. Please ensure your CSV file has proper headers and formatting.")
+
     return {
         "as_text": str(input_artifacts),
         "raw_json": None,

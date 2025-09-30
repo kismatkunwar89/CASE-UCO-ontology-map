@@ -150,7 +150,8 @@ def format_hallucination_instructions(recent_feedbacks: List[str]) -> str:
 
 def _assign_properties(node: Dict[str, Any], properties: Dict[str, Any]) -> None:
     for prop, value in (properties or {}).items():
-        if value is None:
+        # Skip None values and empty strings
+        if value is None or value == "":
             continue
         node[prop] = value
 
