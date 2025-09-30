@@ -117,6 +117,8 @@ def execute_forensic_analysis_session_stream(
 
             # Prepend metadata if provided
             user_message = norm["as_text"]
+            raw_json_data = norm["raw_json"]
+
             if metadata:
                 metadata_lines = []
                 if metadata.get("artifact_type"):
@@ -131,6 +133,21 @@ def execute_forensic_analysis_session_stream(
                     user_message = f"{metadata_str}\n\n{user_message}"
                     print(f"[INFO] Prepended metadata to input")
 
+                # CRITICAL FIX: Wrap CSV data in the same structure as smoke test
+                # This ensures custom_facet agent can process unmapped fields
+                if norm["format"] == "csv" and isinstance(raw_json_data, list) and len(raw_json_data) > 0:
+                    # For CSV with metadata, wrap in expected structure
+                    wrapped_data = {
+                        "artifact_type": metadata.get("artifact_type"),
+                        "description": metadata.get("description"),
+                        "source": metadata.get("source"),
+                        "record": raw_json_data[0]  # First row for single-record CSVs
+                    }
+                    # Remove None values
+                    wrapped_data = {k: v for k, v in wrapped_data.items() if v is not None}
+                    raw_json_data = wrapped_data
+                    print(f"[INFO] Wrapped CSV data with metadata structure for custom facet processing")
+
             # Execute the workflow.
             # Start with DEFAULT_STATE to ensure all keys exist
             initial_state = dict(DEFAULT_STATE)
@@ -139,7 +156,7 @@ def execute_forensic_analysis_session_stream(
                 ("system", "If the user message is JSON, treat it as authoritative source data."),
                 ("user", user_message),
             ]
-            initial_state["rawInputJSON"] = norm["raw_json"]
+            initial_state["rawInputJSON"] = raw_json_data
             initial_state["inputFormat"] = norm["format"]
 
             events = agent.stream(
