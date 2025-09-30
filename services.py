@@ -81,7 +81,8 @@ def ensure_session_directory() -> Path:
 
 def execute_forensic_analysis_session_stream(
     session_id: str,
-    input_artifacts: Any
+    input_artifacts: Any,
+    metadata: Dict[str, Any] = None
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Executes a complete forensic analysis workflow with isolated, persistent state.
@@ -90,6 +91,7 @@ def execute_forensic_analysis_session_stream(
     Args:
         session_id: Unique identifier for this analysis session
         input_artifacts: The forensic artifact description to analyze
+        metadata: Optional metadata dict with artifact_type, description, source
 
     Yields:
         Dict containing event data with type, step information, and session details
@@ -113,13 +115,29 @@ def execute_forensic_analysis_session_stream(
             # Normalize input and prepare for agent execution
             norm = _normalize_input(input_artifacts)
 
+            # Prepend metadata if provided
+            user_message = norm["as_text"]
+            if metadata:
+                metadata_lines = []
+                if metadata.get("artifact_type"):
+                    metadata_lines.append(f"Artifact Type: {metadata['artifact_type']}")
+                if metadata.get("description"):
+                    metadata_lines.append(f"Description: {metadata['description']}")
+                if metadata.get("source"):
+                    metadata_lines.append(f"Source: {metadata['source']}")
+
+                if metadata_lines:
+                    metadata_str = "\n".join(metadata_lines)
+                    user_message = f"{metadata_str}\n\n{user_message}"
+                    print(f"[INFO] Prepended metadata to input")
+
             # Execute the workflow.
             # Start with DEFAULT_STATE to ensure all keys exist
             initial_state = dict(DEFAULT_STATE)
             # Merge request-specific fields
             initial_state["messages"] = [
                 ("system", "If the user message is JSON, treat it as authoritative source data."),
-                ("user", norm["as_text"]),
+                ("user", user_message),
             ]
             initial_state["rawInputJSON"] = norm["raw_json"]
             initial_state["inputFormat"] = norm["format"]

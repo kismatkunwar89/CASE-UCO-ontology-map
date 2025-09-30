@@ -4,7 +4,7 @@ Defines endpoints for health checks and streaming analysis execution.
 """
 
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -19,6 +19,10 @@ class AnalysisInput(BaseModel):
     """Pydantic model for analysis input data."""
     user_identifier: str
     input_artifacts: Any  # accepts dict, list, or string
+    # Optional metadata fields for CSV uploads
+    artifact_type: Optional[str] = None
+    description: Optional[str] = None
+    source: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -65,9 +69,19 @@ async def invoke_streaming_analysis(input_data: AnalysisInput):
             """Generator function for streaming analysis events."""
             try:
                 # Execute the analysis session with streaming
+                # Pass metadata if provided
+                metadata = None
+                if input_data.artifact_type or input_data.description or input_data.source:
+                    metadata = {
+                        "artifact_type": input_data.artifact_type,
+                        "description": input_data.description,
+                        "source": input_data.source
+                    }
+
                 for event in execute_forensic_analysis_session_stream(
                     session_id,
-                    input_data.input_artifacts
+                    input_data.input_artifacts,
+                    metadata=metadata
                 ):
                     # Format event as Server-Sent Event
                     event_data = {

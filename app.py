@@ -105,14 +105,35 @@ Artifact: Windows Prefetch File
             help="Enter unstructured text describing the digital forensic artifact"
         )
     else:  # CSV File Upload
+        # Metadata fields for CSV context
+        st.markdown("**Provide Context for Your CSV Data:**")
+        artifact_type = st.text_input(
+            "Artifact Type",
+            placeholder="e.g., MFT Record, Browser History, Registry Key",
+            help="Specify the type of forensic artifact in your CSV"
+        )
+        description = st.text_input(
+            "Description",
+            placeholder="e.g., File system metadata from forensic image",
+            help="Describe what this data represents"
+        )
+        source = st.text_input(
+            "Source",
+            placeholder="e.g., suspect_laptop_image.E01",
+            help="Specify the source of this data"
+        )
+
+        st.markdown("**Upload CSV File:**")
         uploaded_file = st.file_uploader(
-            "Upload CSV file:",
+            "Choose a CSV file:",
             type=["csv"],
             help="Upload a CSV file containing forensic artifact data. Each row represents one artifact."
         )
 
         if uploaded_file is not None:
             st.success(f"✅ File uploaded: {uploaded_file.name}")
+            if artifact_type or description or source:
+                st.info("✓ Context metadata provided")
             st.info("Click 'Run Analysis' to process the CSV file")
 
     # Run analysis button
@@ -201,12 +222,19 @@ if run_analysis and has_input:
                 # Read CSV file content as string
                 csv_content = uploaded_file.read().decode("utf-8")
 
-                # Prepare API request data with CSV content
+                # Prepare API request data with CSV content and metadata
                 api_data = {
                     "user_identifier": user_identifier,
-                    "input_artifacts": csv_content,
-                    "input_type": "csv"  # Flag to indicate CSV input
+                    "input_artifacts": csv_content
                 }
+
+                # Add metadata if provided
+                if artifact_type:
+                    api_data["artifact_type"] = artifact_type
+                if description:
+                    api_data["description"] = description
+                if source:
+                    api_data["source"] = source
             else:
                 # Try to parse as JSON; if it fails, send as text
                 parsed = None
