@@ -120,21 +120,8 @@ def execute_forensic_analysis_session_stream(
             raw_json_data = norm["raw_json"]
 
             if metadata:
-                metadata_lines = []
-                if metadata.get("artifact_type"):
-                    metadata_lines.append(f"Artifact Type: {metadata['artifact_type']}")
-                if metadata.get("description"):
-                    metadata_lines.append(f"Description: {metadata['description']}")
-                if metadata.get("source"):
-                    metadata_lines.append(f"Source: {metadata['source']}")
-
-                if metadata_lines:
-                    metadata_str = "\n".join(metadata_lines)
-                    user_message = f"{metadata_str}\n\n{user_message}"
-                    print(f"[INFO] Prepended metadata to input")
-
                 # CRITICAL FIX: Wrap CSV data in the same structure as smoke test
-                # This ensures custom_facet agent can process unmapped fields
+                # This ensures ALL agents (ontology researcher, custom_facet) see the correct structure
                 if norm["format"] == "csv" and isinstance(raw_json_data, list) and len(raw_json_data) > 0:
                     # For CSV with metadata, wrap in expected structure
                     wrapped_data = {
@@ -146,7 +133,23 @@ def execute_forensic_analysis_session_stream(
                     # Remove None values
                     wrapped_data = {k: v for k, v in wrapped_data.items() if v is not None}
                     raw_json_data = wrapped_data
-                    print(f"[INFO] Wrapped CSV data with metadata structure for custom facet processing")
+                    # IMPORTANT: Also update the user message to use wrapped format
+                    user_message = json.dumps(wrapped_data, indent=2)
+                    print(f"[INFO] Wrapped CSV data with metadata structure for all agents")
+                else:
+                    # For non-CSV, just prepend metadata as text
+                    metadata_lines = []
+                    if metadata.get("artifact_type"):
+                        metadata_lines.append(f"Artifact Type: {metadata['artifact_type']}")
+                    if metadata.get("description"):
+                        metadata_lines.append(f"Description: {metadata['description']}")
+                    if metadata.get("source"):
+                        metadata_lines.append(f"Source: {metadata['source']}")
+
+                    if metadata_lines:
+                        metadata_str = "\n".join(metadata_lines)
+                        user_message = f"{metadata_str}\n\n{user_message}"
+                        print(f"[INFO] Prepended metadata to input")
 
             # Execute the workflow.
             # Start with DEFAULT_STATE to ensure all keys exist
@@ -189,7 +192,6 @@ def execute_forensic_analysis_session_stream(
                     else:
                         # For other fields, try to serialize or convert to string
                         try:
-                            import json
                             json.dumps(value)  # Test if serializable
                             serializable_event[key] = value
                         except (TypeError, ValueError):
@@ -221,7 +223,6 @@ def execute_forensic_analysis_session_stream(
                 else:
                     # For other fields, try to serialize or convert to string
                     try:
-                        import json
                         json.dumps(value)  # Test if serializable
                         serializable_final_event[key] = value
                     except (TypeError, ValueError):

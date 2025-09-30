@@ -1,6 +1,6 @@
 """
 FastAPI server entry point for the CASE/UCO Ontology Mapping Agent.
-This is the new main.py that serves as the API server backend. , important
+This is the new main.py that serves as the API server backend.
 """
 
 import os
