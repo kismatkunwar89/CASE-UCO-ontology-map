@@ -2,7 +2,7 @@ import json
 import re
 from typing import Dict
 from langchain_core.messages import HumanMessage
-from config import llm
+from config import llm, MAX_SYNTHESIS_ATTEMPTS
 from state import State
 from schemas import OntologyAnalysis
 from utils import _get_input_artifacts
@@ -201,14 +201,39 @@ def ontology_synthesis_node(state: State) -> dict:
     Takes the raw markdown report from the research step and uses a structured
     output LLM to convert it into the 'OntologyAnalysis' Pydantic model.
     This is the most reliable method for guaranteeing a valid JSON structure.
+
+    GUARDRAILS: Includes attempt limits and fallback mechanism.
     """
-    print("[INFO] [Ontology Synthesizer] Starting structured synthesis from markdown report...")
+    current_attempts = state.get("ontologySynthesisAttempts", 0)
+
+    print(f"[INFO] [Ontology Synthesizer] Starting structured synthesis (attempt {current_attempts + 1}/{MAX_SYNTHESIS_ATTEMPTS})...")
+
+    # GUARDRAIL: Check max attempts
+    if current_attempts >= MAX_SYNTHESIS_ATTEMPTS:
+        print(f"[WARNING] [Ontology Synthesizer] Max attempts ({MAX_SYNTHESIS_ATTEMPTS}) reached. Using minimal fallback ontology.")
+        fallback_ontology = {
+            "classes": ["ObservableObject"],
+            "facets": [],
+            "properties": {},
+            "relationships": [],
+            "analysis": "Minimal fallback ontology - synthesis failed after max attempts.",
+            "additional_details": {"fallback": True, "reason": "max_synthesis_attempts_reached"},
+            "fallback": True
+        }
+        return {
+            "ontologyMap": fallback_ontology,
+            "ontologySynthesisAttempts": current_attempts
+        }
 
     ontology_markdown = state.get("ontologyMarkdown")
     if not ontology_markdown:
         error_msg = "No ontology markdown found in state to synthesize."
         print(f"[ERROR] [Ontology Synthesizer] {error_msg}")
-        return {"ontologyMap": {"error": error_msg}}
+        # Increment attempts and potentially retry
+        return {
+            "ontologyMap": {"error": error_msg},
+            "ontologySynthesisAttempts": current_attempts + 1
+        }
 
     # The user's original input is also useful context for the synthesizer.
     original_input = _get_input_artifacts(state)
@@ -283,9 +308,18 @@ def ontology_synthesis_node(state: State) -> dict:
 
         ontology_map["additional_details"] = additional_details
 
-        return {"ontologyMap": ontology_map}
+        # Success - reset attempts counter
+        return {
+            "ontologyMap": ontology_map,
+            "ontologySynthesisAttempts": 0  # Reset on success
+        }
 
     except Exception as e:
         error_msg = f"Failed to synthesize ontology map: {e}"
         print(f"[ERROR] [Ontology Synthesizer] {error_msg}")
-        return {"ontologyMap": {"error": error_msg}}
+        print(f"[INFO] [Ontology Synthesizer] Will retry if attempts < {MAX_SYNTHESIS_ATTEMPTS}")
+        # Increment attempts to trigger retry or fallback
+        return {
+            "ontologyMap": {"error": error_msg},
+            "ontologySynthesisAttempts": current_attempts + 1
+        }

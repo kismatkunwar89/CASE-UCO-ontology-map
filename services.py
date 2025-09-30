@@ -228,13 +228,27 @@ def execute_forensic_analysis_session_stream(
                     except (TypeError, ValueError):
                         serializable_final_event[key] = str(value)
 
-            yield {
+            # Extract suggestions from final state if they exist
+            validation_suggestions = event.get("validation_suggestions", None)
+            hallucination_suggestions = event.get("hallucination_suggestions", None)
+
+            completion_payload = {
                 "type": "completion",
                 "session_id": session_id,
                 "total_steps": step_count,
                 "session_db_path": str(db_path),
                 "final_event": serializable_final_event
             }
+
+            # Include Layer 1 (validation) suggestions if present
+            if validation_suggestions:
+                completion_payload["validation_suggestions"] = validation_suggestions
+
+            # Include Layer 2 (hallucination) suggestions if present
+            if hallucination_suggestions:
+                completion_payload["hallucination_suggestions"] = hallucination_suggestions
+
+            yield completion_payload
 
         except Exception as e:
             print(f"[ERROR] Session {session_id} failed: {str(e)}")

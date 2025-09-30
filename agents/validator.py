@@ -10,6 +10,9 @@ from state import State
 from config import llm, MAX_VALIDATION_ATTEMPTS
 from utils import RE_FENCED_JSON
 from tools import validate_case_jsonld
+from feedback_utils import categorize_validation_feedback
+
+
 # =============================================================================
 # Agent Node Function
 # =============================================================================
@@ -37,9 +40,10 @@ def validator_node(state: State) -> dict:
         print("[ERROR] [Validator] No valid JSON-LD graph to validate.")
         return {"validation_feedback": "No valid JSON-LD graph found in state."}
 
-    feedback_items = []
+    hard_feedback_items = []  # Critical errors (Violations, Warnings, misplaced properties)
+    soft_feedback_items = []  # Informational suggestions (Info messages)
 
-    # --- 1. Dynamic, Programmatic check for misplaced properties ---
+    # --- 1. Dynamic, Programmatic check for misplaced properties (always HARD feedback) ---
     try:
         # Get all properties that are defined as belonging to a facet
         all_facet_properties = set()
@@ -61,37 +65,50 @@ def validator_node(state: State) -> dict:
                     for facet_prop_base in all_facet_properties:
                         for node_prop_full in node_props:
                             if facet_prop_base in node_prop_full:
-                                feedback_items.append(
+                                hard_feedback_items.append(
                                     f"Invalid property placement on node '{node.get('@id')}' of type '{node_type}'. "
                                     f"The property '{node_prop_full}' likely belongs on a Facet, not the parent object."
                                 )
     except Exception as e:
-        feedback_items.append(f"Error during programmatic property placement check: {str(e)}")
+        hard_feedback_items.append(f"Error during programmatic property placement check: {str(e)}")
 
 
     # --- 2. External tool validation for basic syntax ---
+    case_validation_result = ""
+    case_conforms = False
     try:
         case_validation_result = validate_case_jsonld.invoke({
             "input_data": json.dumps(jsonld_graph, indent=2),
             "case_version": "case-1.4.0"
         })
         case_conforms = "Conforms: True" in case_validation_result or "PASSED" in case_validation_result.upper()
+
+        # Categorize case_validate feedback into hard and soft
         if not case_conforms:
-            feedback_items.append(f"External case-utils validation failed: {case_validation_result}")
+            hard_from_case, soft_from_case = categorize_validation_feedback(case_validation_result)
+            hard_feedback_items.extend(hard_from_case)
+            soft_feedback_items.extend(soft_from_case)
     except Exception as e:
         case_validation_result = f"CASE/UCO validation failed due to error: {str(e)}"
-        feedback_items.append(case_validation_result)
+        hard_feedback_items.append(case_validation_result)
         case_conforms = False
 
 
     # --- 3. Combine feedback and make a decision ---
-    is_clean = not feedback_items
-    final_feedback = "\n".join(feedback_items) if not is_clean else "Layer 1 validation passed."
+    # Validation passes if there are NO hard feedback items (soft feedback is OK)
+    is_clean = len(hard_feedback_items) == 0
+
+    # Prepare feedback strings
+    if hard_feedback_items:
+        final_feedback = "CRITICAL ERRORS:\n" + "\n".join(hard_feedback_items)
+    else:
+        final_feedback = "Layer 1 validation passed."
 
     validation_result = {
         "is_clean": is_clean,
         "feedback": final_feedback,
-        "violations": feedback_items,
+        "violations": hard_feedback_items,
+        "suggestions": soft_feedback_items,
         "case_uco_result": case_validation_result,
         "case_uco_passed": case_conforms
     }
@@ -101,23 +118,35 @@ def validator_node(state: State) -> dict:
         "timestamp": datetime.now().isoformat(),
         "feedback": final_feedback,
         "is_clean": is_clean,
-        "case_uco_result": case_validation_result
+        "case_uco_result": case_validation_result,
+        "suggestions_count": len(soft_feedback_items)
     }
     updated_history = validation_history + [current_attempt_record]
 
     if is_clean:
+        # Validation passed! Store soft feedback as suggestions for the user
         print("[SUCCESS] [Validator] Layer 1 validation passed.")
+        if soft_feedback_items:
+            print(f"[INFO] [Validator] Found {len(soft_feedback_items)} suggestion(s) for user.")
+
         preserved_result = {
             "jsonldGraph": jsonld_graph,
             "timestamp": datetime.now().isoformat()
         }
-        return {
+
+        return_dict = {
             "validation_result": validation_result,
             "layer1_preserved_result": preserved_result,
             "validationAttempts": current_attempts + 1,
             "validationHistory": updated_history,
             "messages": [HumanMessage(content="Layer 1 validation passed.", name="validator_agent")]
         }
+
+        # Add validation suggestions if any exist
+        if soft_feedback_items:
+            return_dict["validation_suggestions"] = soft_feedback_items
+
+        return return_dict
     else:
         print(f"[FAILURE] [Validator] Layer 1 validation failed: {final_feedback}")
         

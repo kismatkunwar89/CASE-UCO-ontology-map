@@ -4,6 +4,7 @@ from typing import Dict, Iterable, List, Tuple
 
 from state import State
 from tools import _generate_record_fingerprint, _uuid5, NS_RECORD, NS_SLOT
+from config import MAX_UUID_PLANNING_ATTEMPTS, MAX_RECORDS_PER_PLAN
 
 
 PROPERTY_ALIAS_MAP = {
@@ -192,8 +193,31 @@ def _build_source_property_map(records: List[Dict], plan_rows: List[OrderedDict[
 
 
 def uuid_planner_node(state: State) -> dict:
-    """Build a deterministic UUID plan per record using ontology hints."""
-    print("[INFO] [UUID Planner] Running incremental planner...")
+    """
+    Build a deterministic UUID plan per record using ontology hints.
+
+    GUARDRAILS: Includes attempt limits and record limits to prevent infinite loops and memory exhaustion.
+    """
+    current_attempts = state.get("uuidPlanningAttempts", 0)
+
+    print(f"[INFO] [UUID Planner] Running incremental planner (attempt {current_attempts + 1}/{MAX_UUID_PLANNING_ATTEMPTS})...")
+
+    #GUARDRAIL: Check max planning attempts
+    if current_attempts >= MAX_UUID_PLANNING_ATTEMPTS:
+        print(f"[WARNING] [UUID Planner] Max planning attempts ({MAX_UUID_PLANNING_ATTEMPTS}) reached.")
+        print("[INFO] [UUID Planner] Using current plan even if imperfect to allow workflow to continue.")
+        # Return current plan without incrementing - we're done trying
+        current_plan = state.get("uuidPlan") or []
+        current_map = state.get("slotTypeMap", {})
+        current_fingerprints = state.get("recordFingerprints") or []
+        current_source_map = state.get("sourcePropertyMap", {})
+        return {
+            "uuidPlan": current_plan,
+            "slotTypeMap": current_map,
+            "recordFingerprints": current_fingerprints,
+            "sourcePropertyMap": current_source_map,
+            "uuidPlanningAttempts": current_attempts  # Don't increment - we're done
+        }
 
     raw_input = state.get("rawInputJSON")
     records = _extract_records(raw_input)
@@ -204,7 +228,18 @@ def uuid_planner_node(state: State) -> dict:
 
     if not records:
         print("[WARNING] [UUID Planner] No records found in rawInputJSON to plan for.")
-        return {"uuidPlan": [], "slotTypeMap": {}, "recordFingerprints": [], "sourcePropertyMap": {}}
+        return {
+            "uuidPlan": [],
+            "slotTypeMap": {},
+            "recordFingerprints": [],
+            "sourcePropertyMap": {},
+            "uuidPlanningAttempts": 0  # Reset on no records
+        }
+
+    # GUARDRAIL: Limit number of records to prevent memory exhaustion
+    if len(records) > MAX_RECORDS_PER_PLAN:
+        print(f"[WARNING] [UUID Planner] Too many records ({len(records)}). Limiting to {MAX_RECORDS_PER_PLAN}.")
+        records = records[:MAX_RECORDS_PER_PLAN]
 
     ontology_map = state.get("ontologyMap", {})
     ontology_classes = list(ontology_map.get("classes", []))
@@ -276,28 +311,55 @@ def uuid_planner_node(state: State) -> dict:
 
     print(f"[SUCCESS] [UUID Planner] Generated plan for {len(new_plan)} records.")
 
+    # Success - reset attempts counter
     return {
         "recordFingerprints": current_fingerprints,
         "uuidPlan": new_plan,
         "slotTypeMap": new_map,
         "sourcePropertyMap": source_property_map,
+        "uuidPlanningAttempts": 0  # Reset on successful planning
     }
 
 def invalidate_uuid_plan_node(state: State) -> dict:
     """
     Clears the UUID plan from the state to force regeneration.
     Can perform partial invalidation if `uuids_to_invalidate` is present in the state.
+
+    GUARDRAILS: Increments planning attempt counter to prevent infinite invalidation loops.
     """
+    current_attempts = state.get("uuidPlanningAttempts", 0)
+
+    print(f"[INFO] [UUID Invalidator] Invalidation attempt {current_attempts + 1}/{MAX_UUID_PLANNING_ATTEMPTS}")
+
+    # GUARDRAIL: If we've reached max attempts, don't invalidate - use what we have
+    if current_attempts >= MAX_UUID_PLANNING_ATTEMPTS:
+        print(f"[WARNING] [UUID Invalidator] Max planning attempts reached. Skipping invalidation.")
+        print("[INFO] [UUID Invalidator] Proceeding with current plan to avoid infinite loop.")
+        return {
+            "uuids_to_invalidate": None,  # Clear the invalidation request
+            "uuidPlanningAttempts": current_attempts  # Keep counter as-is
+        }
+
     uuids_to_invalidate = state.get("uuids_to_invalidate")
     if uuids_to_invalidate:
         print(f"[INFO] [UUID Invalidator] Invalidating parts of UUID plan for: {uuids_to_invalidate}")
         current_plan = state.get("uuidPlan", [])
         new_plan = [plan for plan in current_plan if not any(uuid in plan.values() for uuid in uuids_to_invalidate)]
-        
+
         current_map = state.get("slotTypeMap", {})
         new_map = {k: v for k, v in current_map.items() if k not in uuids_to_invalidate}
 
-        return {"uuidPlan": new_plan, "slotTypeMap": new_map, "uuids_to_invalidate": None}
+        return {
+            "uuidPlan": new_plan,
+            "slotTypeMap": new_map,
+            "uuids_to_invalidate": None,
+            "uuidPlanningAttempts": current_attempts + 1  # Increment on invalidation
+        }
     else:
         print("[INFO] [UUID Invalidator] Invalidating entire UUID plan due to general ID-related feedback.")
-        return {"uuidPlan": None, "slotTypeMap": None, "recordFingerprints": None}
+        return {
+            "uuidPlan": None,
+            "slotTypeMap": None,
+            "recordFingerprints": None,
+            "uuidPlanningAttempts": current_attempts + 1  # Increment on invalidation
+        }

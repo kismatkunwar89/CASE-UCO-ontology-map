@@ -32,6 +32,11 @@ class State(_BaseState, total=False):
     validationAttempts: int
     layer2_attempts: int
 
+    # NEW: Guardrail counters for ontology agents and UUID planner
+    ontologyResearchAttempts: int
+    ontologySynthesisAttempts: int
+    uuidPlanningAttempts: int
+
     # Error and feedback fields
     customFacetErrors: List[str]
     graphGeneratorErrors: List[str]
@@ -80,6 +85,8 @@ class State(_BaseState, total=False):
     l1_valid: bool
     l2_valid: bool
     uuids_to_invalidate: List[str] | None
+    validation_suggestions: List[str] | None
+    hallucination_suggestions: List[str] | None
 
 
 # =============================================================================
@@ -101,6 +108,9 @@ DEFAULT_STATE = {
     "customFacetAttempts": 0,
     "graphGeneratorAttempts": 0,
     "validationAttempts": 0,
+    "ontologyResearchAttempts": 0,
+    "ontologySynthesisAttempts": 0,
+    "uuidPlanningAttempts": 0,
     "customFacetErrors": [],
     "graphGeneratorErrors": [],
     "validationErrors": [],
@@ -125,4 +135,6 @@ DEFAULT_STATE = {
     "plannerVersion": "v1",
     "sourcePropertyMap": {},
     "uuids_to_invalidate": None,
+    "validation_suggestions": None,
+    "hallucination_suggestions": None,
 }

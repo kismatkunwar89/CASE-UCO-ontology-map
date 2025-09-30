@@ -56,5 +56,9 @@ class ForensicHallucinationDetectionResult(BaseModel):
     data_integrity: Literal["yes", "no"]
     confidence_score: float = Field(ge=0.0, le=1.0)
     validation_decision: Literal["PASS", "REGENERATE"]
+    severity_level: Literal["critical", "moderate", "informational"] = Field(
+        default="critical",
+        description="Severity of detected hallucinations: critical=must fix (fabricated data), moderate=should fix (questionable), informational=observations only"
+    )
     hallucination_details: str
     corrections_needed: str

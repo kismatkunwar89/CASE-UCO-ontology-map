@@ -13,7 +13,7 @@ from config import (
 )
 # Removed generate_uuid import - using deterministic UUID plan instead
 from utils import _get_input_artifacts
-from agents.hallucination_checker import FeedbackProcessingAgent, DynamicCorrectionAgent
+from agents.hallucination_checker import DynamicCorrectionAgent
 
 
 DEFAULT_CONTEXT = {

@@ -9,30 +9,11 @@ from langchain_openai import ChatOpenAI
 from state import State
 from schemas import ForensicHallucinationDetectionResult
 from utils import _get_input_artifacts, _msg_text
+from feedback_utils import categorize_hallucination_feedback
 
-class FeedbackProcessingAgent:
-    """A class to dynamically process hallucination feedback into actionable instructions."""
-
-    def __init__(self, llm):
-        self.llm = llm
-
-    def analyze_feedback(self, feedback_list: list) -> str:
-        if not feedback_list:
-            return ""
-        analysis_prompt = f"""You are a feedback analysis expert. Analyze the hallucination feedback below and create specific, actionable instructions for a JSON-LD generator.
-
-Feedback to analyze:
-{chr(10).join([f"- {fb}" for fb in feedback_list])}
-
-Create clear, specific instructions to prevent these issues from recurring. Focus on:
-1. What specific data to avoid
-2. What properties to omit
-3. What patterns to change
-4. How to validate against original input
-
-Return only the direct and specific instructions."""
-        response = self.llm.invoke(analysis_prompt)
-        return response.content
+# NOTE: FeedbackProcessingAgent was removed as it was never instantiated or used.
+# The format_hallucination_instructions() function in graph_generator.py handles
+# feedback formatting directly in the LLM prompt.
 
 class DynamicCorrectionAgent:
     """A class to apply corrections to a JSON object based on dynamic analysis."""
@@ -89,7 +70,12 @@ CRITICAL RULES:
 2. No hardcoded paths, sizes, or fabricated data is allowed.
 3. Ignore structural elements like @id, @context, @type, namespaces, and facet identifiers.
 
-Analyze the JSON-LD output below and detect any hallucinations.
+SEVERITY CLASSIFICATION:
+- **critical**: Completely fabricated data (e.g., fake timestamps, invented IP addresses, made-up file paths)
+- **moderate**: Questionable inferences that go beyond the input (e.g., assuming default values, overly specific interpretations)
+- **informational**: Minor observations or potential improvements (e.g., could add more metadata, property could be more specific)
+
+Analyze the JSON-LD output below and detect any hallucinations. Set severity_level appropriately.
 
 ORIGINAL INPUT ARTIFACTS:
 {input_artifacts}
@@ -150,20 +136,44 @@ def hallucination_check_node(state: State) -> dict:
 
     is_clean = result.hallucinations_detected == "no"
 
+    # Categorize hallucination feedback into hard (critical/moderate) and soft (informational)
+    hard_hall_feedback = []
+    soft_hall_feedback = []
+
+    if not is_clean:
+        hard_feedback, soft_feedback = categorize_hallucination_feedback(
+            result.hallucination_details,
+            result.corrections_needed,
+            result.severity_level
+        )
+        hard_hall_feedback.extend(hard_feedback)
+        soft_hall_feedback.extend(soft_feedback)
+
+    # Validation passes if no hard feedback (soft feedback is OK)
+    has_critical_issues = len(hard_hall_feedback) > 0
+
     update = {
         "hallucination_result": result.dict(),
         "layer2_attempts": current_attempts + 1,
-        "l2_valid": bool(result.validation_decision == "PASS"),
+        "l2_valid": bool(result.validation_decision == "PASS" or not has_critical_issues),
     }
 
-    if is_clean:
-        update["hallucination_feedback"] = ""
-    else:
+    if soft_hall_feedback:
+        print(f"[INFO] [Hallucination Check] Found {len(soft_hall_feedback)} informational observation(s).")
+        update["hallucination_suggestions"] = soft_hall_feedback
+
+    if has_critical_issues:
+        # Only treat as failure if there are critical/moderate issues
         feedback = result.corrections_needed
         update["hallucination_feedback"] = feedback
         update["layer2_feedback_history"] = feedback_history + [feedback]
         if current_attempts + 1 >= 2:
             update["use_fallback_result"] = True
             update["layer2_final_status"] = "FAILED_WITH_LEARNING"
-    
+        print(f"[WARNING] [Hallucination Check] Found {len(hard_hall_feedback)} critical/moderate issue(s).")
+    else:
+        # No critical issues - pass validation
+        update["hallucination_feedback"] = ""
+        print("[SUCCESS] [Hallucination Check] Layer 2 validation passed.")
+
     return update

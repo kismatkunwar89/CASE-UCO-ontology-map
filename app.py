@@ -386,6 +386,40 @@ if run_analysis and has_input:
                             use_container_width=True
                         )
 
+                    # Display suggestions from both validation layers if present
+                    validation_suggestions = final_result.get("validation_suggestions", None)
+                    hallucination_suggestions = final_result.get("hallucination_suggestions", None)
+
+                    # Show suggestions if either layer has them
+                    if (validation_suggestions and len(validation_suggestions) > 0) or \
+                       (hallucination_suggestions and len(hallucination_suggestions) > 0):
+                        with json_container.container():
+                            st.subheader("💡 Suggestions for Improvement")
+
+                            total_suggestions = (len(validation_suggestions) if validation_suggestions else 0) + \
+                                              (len(hallucination_suggestions) if hallucination_suggestions else 0)
+
+                            st.info(f"Found {total_suggestions} suggestion(s) to enhance your data quality and graph structure.")
+
+                            with st.expander("📝 View All Suggestions", expanded=False):
+                                # Layer 1 (Structural/Syntax) suggestions
+                                if validation_suggestions and len(validation_suggestions) > 0:
+                                    st.markdown("### 📐 Structural & Syntax Suggestions (Layer 1)")
+                                    st.caption("Recommendations for improving CASE/UCO compliance and graph structure")
+                                    for idx, suggestion in enumerate(validation_suggestions, 1):
+                                        st.markdown(f"**{idx}.** {suggestion}")
+                                    st.markdown("---")
+
+                                # Layer 2 (Data Fidelity) observations
+                                if hallucination_suggestions and len(hallucination_suggestions) > 0:
+                                    st.markdown("### 🔍 Data Fidelity Observations (Layer 2)")
+                                    st.caption("Informational observations about data accuracy and completeness")
+                                    for idx, suggestion in enumerate(hallucination_suggestions, 1):
+                                        st.markdown(f"**{idx}.** {suggestion}")
+
+                                st.markdown("---")
+                                st.caption("ℹ️ These are informational suggestions and do not prevent successful validation.")
+
                     # Display Phoenix traceability link
                     phoenix_endpoint = "https://app.phoenix.arize.com/s/ktamsik101/v1/traces"
                     phoenix_url = f"{phoenix_endpoint}?session_id={session_id}"

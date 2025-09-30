@@ -5,11 +5,18 @@ from langchain_openai import ChatOpenAI
 # Guardrails and Configuration
 # =============================================================================
 
-# Guardrails
+# Guardrails - Attempt Limits
 MAX_CUSTOM_FACET_ATTEMPTS = 2
 MAX_GRAPH_GENERATOR_ATTEMPTS = 3
 MAX_VALIDATION_ATTEMPTS = 3
 MAX_HALLUCINATION_ATTEMPTS = 2
+
+# NEW: Guardrails for Ontology Agents and UUID Planner
+MAX_ONTOLOGY_RESEARCH_ATTEMPTS = 5  # Max attempts for ontology research
+MAX_TOOL_CALLS_PER_RESEARCH = 20    # Max tool calls in single research session
+MAX_SYNTHESIS_ATTEMPTS = 3           # Max attempts for synthesizing ontology from markdown
+MAX_UUID_PLANNING_ATTEMPTS = 3       # Max times UUID plan can be invalidated and regenerated
+MAX_RECORDS_PER_PLAN = 1000          # Max records to plan UUIDs for (prevents memory exhaustion)
 
 # LLM configuration - This central instance can be imported by any agent
 llm = ChatOpenAI(
